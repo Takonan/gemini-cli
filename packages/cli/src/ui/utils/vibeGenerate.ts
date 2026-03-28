@@ -15,10 +15,10 @@ const NUM_VARIANTS = 3;
 
 /**
  * Model config key for vibetype suggestion calls.
- * Falls back to the default model; users can override via modelConfig
- * settings if they want a faster/cheaper model for tree generation.
+ * Reuses the prompt-completion alias (gemini-2.5-flash-lite, no thinking
+ * budget) — fast and cheap, ideal for background tree generation.
  */
-const VIBE_MODEL_CONFIG_KEY = { model: 'vibetype-suggest' };
+const VIBE_MODEL_CONFIG_KEY = { model: 'prompt-completion' };
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
