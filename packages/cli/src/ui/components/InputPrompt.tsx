@@ -642,16 +642,6 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
 
   const handleInput = useCallback(
     (key: Key) => {
-      // When vibe mode is active, VibeInput owns all keyboard handling.
-      // Allow Ctrl+Space to toggle back; swallow everything else so keys
-      // don't leak into the text buffer while the vibe tree is shown.
-      if (vibeModeActive) {
-        if (keyMatchers[Command.TOGGLE_VIBE_MODE](key)) {
-          setVibeModeActive(false);
-        }
-        return;
-      }
-
       // Determine if this keypress is a history navigation command
       const isHistoryUp =
         !shellModeActive &&
@@ -1374,13 +1364,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       keyMatchers,
       isHelpDismissKey,
       settings,
-      vibeModeActive,
-      setVibeModeActive,
     ],
   );
 
   useKeypress(handleInput, {
-    isActive: !isEmbeddedShellFocused,
+    isActive: !isEmbeddedShellFocused && !vibeModeActive,
     priority: true,
   });
 
