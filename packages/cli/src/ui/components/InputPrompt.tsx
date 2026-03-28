@@ -80,6 +80,11 @@ import { useAlternateBuffer } from '../hooks/useAlternateBuffer.js';
 import { useIsHelpDismissKey } from '../utils/shortcutsHelp.js';
 import { useRepeatedKeyPress } from '../hooks/useRepeatedKeyPress.js';
 import { useKeyMatchers } from '../hooks/useKeyMatchers.js';
+import { VibeInput } from './VibeInput.js';
+import {
+  makeVibeGenerator,
+  extractConversationContext,
+} from '../utils/vibeGenerate.js';
 
 /**
  * Returns if the terminal can be trusted to handle paste events atomically
@@ -236,6 +241,18 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     backgroundShellHeight,
     shortcutsHelpVisible,
   } = useUIState();
+  const [vibeModeActive, setVibeModeActive] = useState(false);
+  const generateVibeOptions = useMemo(
+    () => makeVibeGenerator(config.getBaseLlmClient()),
+    [config],
+  );
+  const vibeContext = useMemo(
+    () => extractConversationContext(history),
+    // Snapshot conversation at the moment vibe mode opens, not on every turn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [vibeModeActive],
+  );
+
   const [suppressCompletion, setSuppressCompletion] = useState(false);
   const { handlePress: registerPlainTabPress, resetCount: resetPlainTabPress } =
     useRepeatedKeyPress({
@@ -851,6 +868,15 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       ) {
         setShellModeActive(!shellModeActive);
         buffer.setText(''); // Clear the '!' from input
+        return true;
+      }
+
+      if (
+        keyMatchers[Command.TOGGLE_VIBE_MODE](key) &&
+        !shellModeActive &&
+        streamingState === StreamingState.Idle
+      ) {
+        setVibeModeActive((v) => !v);
         return true;
       }
 
@@ -1538,6 +1564,29 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     isShellFocused && !isEmbeddedShellFocused
       ? (statusColor ?? theme.ui.focus)
       : theme.border.default;
+
+  if (vibeModeActive) {
+    return (
+      <HalfLinePaddedBox
+        backgroundBaseColor={theme.background.input}
+        backgroundOpacity={1}
+        useBackgroundColor={useBackgroundColor}
+      >
+        <Box flexGrow={1} paddingX={1}>
+          <VibeInput
+            onSubmit={(value) => {
+              setVibeModeActive(false);
+              onSubmit(value);
+            }}
+            onCancel={() => setVibeModeActive(false)}
+            inputWidth={inputWidth}
+            generateOptions={generateVibeOptions}
+            conversationContext={vibeContext}
+          />
+        </Box>
+      </HalfLinePaddedBox>
+    );
+  }
 
   return (
     <>
