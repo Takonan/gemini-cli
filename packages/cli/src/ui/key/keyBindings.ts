@@ -640,6 +640,7 @@ export const commandDescriptions: Readonly<Record<Command, string>> = {
     'Move focus from background shell list to Gemini.',
   [Command.SHOW_BACKGROUND_SHELL_UNFOCUS_WARNING]:
     'Show warning when trying to move focus away from background shell.',
+  [Command.TOGGLE_VIBE_MODE]: 'Toggle vibetype speculative input mode.',
 };
 
 const keybindingsSchema = z.array(
