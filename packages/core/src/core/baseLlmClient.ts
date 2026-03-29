@@ -258,6 +258,45 @@ export class BaseLlmClient {
     );
   }
 
+  async *generateContentStream(
+    options: GenerateContentOptions,
+  ): AsyncGenerator<GenerateContentResponse> {
+    const {
+      modelConfigKey,
+      contents,
+      systemInstruction,
+      abortSignal,
+      promptId,
+      role,
+    } = options;
+
+    const { model, config: generateContentConfig } = applyModelSelection(
+      this.config,
+      modelConfigKey,
+    );
+
+    const finalConfig: GenerateContentConfig = {
+      ...generateContentConfig,
+      ...(systemInstruction && { systemInstruction }),
+      abortSignal,
+    };
+    const requestParams: GenerateContentParameters = {
+      model,
+      config: finalConfig,
+      contents,
+    };
+
+    const stream = await this.contentGenerator.generateContentStream(
+      requestParams,
+      promptId,
+      role,
+    );
+
+    for await (const chunk of stream) {
+      yield chunk;
+    }
+  }
+
   private async _generateWithRetry(
     options: _CommonGenerateOptions,
     shouldRetryOnContent: (response: GenerateContentResponse) => boolean,

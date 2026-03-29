@@ -55,6 +55,10 @@ export interface VibeInputProps {
    * Project configuration for file searching and @-mention resolution.
    */
   config?: Config;
+  /**
+   * If true, starts Vibe Mode in freeform text entry mode.
+   */
+  initialFreeMode?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -214,6 +218,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   conversationContext = '',
   workspaceContext = '',
   config,
+  initialFreeMode,
 }) => {
   const [uiStep, setUiStep] = useState<UIStep>('intent');
   const [rootOptions, setRootOptions] = useState<VibeOption[] | null>(null);
@@ -225,7 +230,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   const [initialLoading, setInitialLoading] = useState(true);
   const [waitingForChildren, setWaitingForChildren] = useState(false);
   const [spinFrame, setSpinFrame] = useState(0);
-  const [freeMode, setFreeMode] = useState(false);
+  const [freeMode, setFreeMode] = useState(initialFreeMode ?? false);
   const [freeText, setFreeText] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -376,7 +381,8 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     async (comment = '', isContinuation = false) => {
       const vi = variantIndices[activeIndex] ?? 0;
       const variant = getVariant(currentOptions, activeIndex, vi);
-      if (!variant) return;
+      // If we are in freeMode at root, variant might be null but we have comment
+      if (!variant && !comment) return;
 
       let targetSentence = '';
       const sentences = getSentences(currentParagraph || '');
@@ -390,9 +396,9 @@ export const VibeInput: React.FC<VibeInputProps> = ({
 
       try {
         const projectRoot = config?.getWorkspaceContext().getDirectories()[0];
-        const text = await vibeGenerator.generateParagraph(
+        const stream = vibeGenerator.generateParagraphStream(
           conversationContext,
-          variant.label,
+          variant?.label || '',
           comment,
           targetSentence,
           currentParagraph || '',
@@ -402,17 +408,19 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           projectRoot,
         );
 
-        if (targetSentence && currentParagraph) {
-          // Surgical splice
-          const updated = currentParagraph.replace(targetSentence, text);
-          setCurrentParagraph(updated);
-        } else if (isContinuation && currentParagraph) {
-          setCurrentParagraph((prev) => (prev ? `${prev} ${text}` : text));
-        } else {
-          setCurrentParagraph(text);
+        for await (const text of stream) {
+          if (targetSentence && currentParagraph) {
+            // Surgical splice
+            const updated = currentParagraph.replace(targetSentence, text);
+            setCurrentParagraph(updated);
+          } else if (isContinuation && currentParagraph) {
+            setCurrentParagraph((prev) => (prev ? `${prev} ${text}` : text));
+          } else {
+            setCurrentParagraph(text);
+          }
+          setUiStep('paragraph');
         }
 
-        setUiStep('paragraph');
         setActiveSentenceIdx(-1);
         setActivePlaceholderIdx(-1);
       } catch (err) {
@@ -531,7 +539,8 @@ export const VibeInput: React.FC<VibeInputProps> = ({
 
   const handleKeyPress = useCallback(
     (key: Key) => {
-      if (initialLoading || loadError || loading) return false;
+      if (loadError || loading) return false;
+      if (initialLoading && !freeMode) return false;
 
       // ── Free text mode / Direction mode ──
       if (freeMode) {
@@ -607,7 +616,11 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           ? suggestions.filter((s) => s.label.toLowerCase().includes(query))
           : suggestions;
 
-        if (key.name === 'return' || key.sequence === '\r') {
+        if (
+          key.name === 'return' ||
+          key.sequence === '\r' ||
+          key.name === 'tab'
+        ) {
           const rawComment =
             matches.length > 0 && activeSuggestionIdx < matches.length
               ? matches[activeSuggestionIdx].label
@@ -618,6 +631,16 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           setActiveSuggestionIdx(0);
 
           if (!rawComment) return true;
+
+          // If we are at root, and we matched a suggestion, update activeIndex
+          if (uiStep === 'intent' && matches.length > 0) {
+            const optIndex = currentOptions.findIndex(
+              (opt) => opt.variants[0]?.label === rawComment,
+            );
+            if (optIndex !== -1) {
+              setActiveIndex(optIndex);
+            }
+          }
 
           // Placeholder fill: [name]=rough value
           const phs = getPlaceholders(currentParagraph || '');
@@ -645,11 +668,6 @@ export const VibeInput: React.FC<VibeInputProps> = ({
             );
           } else {
             void handleGenerateParagraph(comment, isActuallyContinuing);
-          }
-          return true;
-        } else if (key.name === 'tab') {
-          if (matches.length > 0) {
-            setFreeText(matches[activeSuggestionIdx].label);
           }
           return true;
         } else if (key.name === 'up') {
@@ -907,22 +925,17 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     );
   }
 
-  if (initialLoading) {
-    return (
-      <Box>
-        <Text color="magenta">{SPIN[spinFrame]} </Text>
-        <Text dimColor>generating suggestions...</Text>
-      </Box>
-    );
-  }
-
   if (freeMode) {
     const suggestions =
-      activeSentenceIdx !== -1
-        ? refinements
-        : activePlaceholderIdx === -1
-          ? continuations
-          : [];
+      uiStep === 'intent'
+        ? currentOptions.map((opt) => ({
+            label: opt.variants[0]?.label ?? '',
+          }))
+        : activeSentenceIdx !== -1
+          ? refinements
+          : activePlaceholderIdx === -1
+            ? continuations
+            : [];
     const query = freeText.trim().toLowerCase();
     const matches = query
       ? suggestions.filter((s) => s.label.toLowerCase().includes(query))
@@ -962,12 +975,14 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           </Box>
         )}
 
-        {mentionQuery === null && refinementLoading && matches.length === 0 && (
-          <Box marginTop={1}>
-            <Text color="magenta">{SPIN[spinFrame]} </Text>
-            <Text dimColor>fetching suggestions...</Text>
-          </Box>
-        )}
+        {mentionQuery === null &&
+          (refinementLoading || (uiStep === 'intent' && initialLoading)) &&
+          matches.length === 0 && (
+            <Box marginTop={1}>
+              <Text color="magenta">{SPIN[spinFrame]} </Text>
+              <Text dimColor>generating...</Text>
+            </Box>
+          )}
 
         {mentionQuery === null && matches.length > 0 && (
           <Box flexDirection="column" marginTop={1}>
@@ -996,11 +1011,20 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     );
   }
 
+  if (initialLoading) {
+    return (
+      <Box>
+        <Text color="magenta">{SPIN[spinFrame]} </Text>
+        <Text dimColor>generating...</Text>
+      </Box>
+    );
+  }
+
   if (loading) {
     return (
       <Box>
         <Text color="magenta">{SPIN[spinFrame]} </Text>
-        <Text dimColor>generating draft...</Text>
+        <Text dimColor>generating...</Text>
       </Box>
     );
   }
@@ -1082,7 +1106,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       {waitingForChildren ? (
         <Box>
           <Text color="magenta">{SPIN[spinFrame]} </Text>
-          <Text dimColor>generating options...</Text>
+          <Text dimColor>generating...</Text>
         </Box>
       ) : (
         <>

@@ -319,6 +319,17 @@ export interface VibeGenerator {
     workspaceContext?: string,
     projectRoot?: string,
   ) => Promise<string>;
+  generateParagraphStream: (
+    convContext: string,
+    intentLabel: string,
+    comment?: string,
+    targetSentence?: string,
+    fullContext?: string,
+    isContinuation?: boolean,
+    abortSignal?: AbortSignal,
+    workspaceContext?: string,
+    projectRoot?: string,
+  ) => AsyncGenerator<string>;
   fillPlaceholder: (
     paragraph: string,
     phText: string,
@@ -496,6 +507,75 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
 
       const parsed = result as { text?: string; chunk?: string };
       return (parsed.text ?? parsed.chunk ?? '').trim();
+    },
+
+    async *generateParagraphStream (
+      convContext,
+      intentLabel,
+      comment,
+      targetSentence,
+      fullContext,
+      isContinuation,
+      abortSignal,
+      workspaceContext,
+      projectRoot,
+    ) {
+      // Resolve @-mentions in the comment or intent label
+      let resolvedWsContext = workspaceContext || '';
+      const mentionRegex = /@([\w/.-]+)/g;
+      const mentions = new Set<string>();
+      let m;
+      if (comment) {
+        while ((m = mentionRegex.exec(comment)) !== null) mentions.add(m[1]);
+      }
+      if (intentLabel) {
+        while ((m = mentionRegex.exec(intentLabel)) !== null)
+          mentions.add(m[1]);
+      }
+
+      if (mentions.size > 0 && projectRoot) {
+        resolvedWsContext += '\n\nReferenced Files:\n';
+        for (const mention of mentions) {
+          const filePath = path.resolve(projectRoot, mention);
+          try {
+            if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+              const content = fs.readFileSync(filePath, 'utf8');
+              const summary = summarizeFile(mention, content);
+              resolvedWsContext += `--- ${mention} ---\n${summary}\n`;
+            }
+          } catch {
+            // Skip unreadable files
+          }
+        }
+      }
+
+      const prompt = buildParagraphPrompt(
+        convContext,
+        intentLabel,
+        comment,
+        targetSentence,
+        fullContext,
+        isContinuation,
+        resolvedWsContext,
+      );
+
+      const stream = baseLlmClient.generateContentStream({
+        modelConfigKey: VIBE_MODEL_CONFIG_KEY,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        abortSignal: abortSignal ?? new AbortController().signal,
+        promptId: 'vibe-paragraph-stream',
+        role: LlmRole.UTILITY_TOOL,
+      });
+
+      let accumulated = '';
+      for await (const chunk of stream) {
+        const text =
+          chunk.candidates?.[0]?.content?.parts?.[0]?.text ||
+          chunk.candidates?.[0]?.content?.parts?.[0]?.thought ||
+          '';
+        accumulated += text;
+        yield accumulated;
+      }
     },
 
     fillPlaceholder: async (

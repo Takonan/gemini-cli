@@ -1584,9 +1584,9 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       >
         <Box flexGrow={1} paddingX={1}>
           <VibeInput
-            onSubmit={(value) => {
+            onSubmit={(val) => {
               setVibeModeActive(false);
-              handleSubmit(value);
+              onSubmit(val);
             }}
             onCancel={() => setVibeModeActive(false)}
             inputWidth={inputWidth}
@@ -1594,6 +1594,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             conversationContext={vibeContext}
             workspaceContext={workspaceContext}
             config={config}
+            initialFreeMode={true}
           />
         </Box>
       </HalfLinePaddedBox>
