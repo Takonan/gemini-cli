@@ -466,7 +466,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         } else if (
           key.sequence &&
           !key.ctrl &&
-          !key.meta &&
+          !key.cmd &&
           key.sequence.length === 1
         ) {
           setFreeText((t) => t + key.sequence);
