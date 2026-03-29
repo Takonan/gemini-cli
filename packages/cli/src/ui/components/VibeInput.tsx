@@ -5,7 +5,10 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
+import type { VibeGenerator } from '../utils/vibeGenerate.js';
+import { useKeypress, type Key } from '../hooks/useKeypress.js';
+import { KeypressPriority } from '../contexts/KeypressContext.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,19 +33,12 @@ export interface VibeInputProps {
   /** Available width, passed through from InputPrompt's inputWidth prop */
   inputWidth: number;
   /**
-   * Generates suggestion options for the tree.
-   * pathContext: the chain of labels selected so far (empty = root).
-   * convContext: the seeded conversation summary for relevance.
+   * Generates suggestion options and refinements.
    */
-  generateOptions: (
-    pathContext: Array<{ label: string }>,
-    convContext: string,
-    abortSignal: AbortSignal,
-  ) => Promise<VibeOption[]>;
+  vibeGenerator: VibeGenerator;
   /**
    * Last few messages from GeminiCLI's conversation history, collapsed to a
    * plain string. Used to seed context-relevant root suggestions.
-   * See the InputPrompt wiring for how to derive this from uiState.history.
    */
   conversationContext?: string;
 }
@@ -81,6 +77,40 @@ function wrapText(text: string, maxWidth: number): string[] {
   return lines;
 }
 
+function getSentences(text: string): string[] {
+  if (!text) return [];
+  // Split by sentence markers but ignore common abbreviations
+  const regex =
+    /[^.!?]*?(?:\b(?:Dr|Prof|Mr|Ms|Mrs|Sr|Jr)\.[^.!?]*?)*?[.!?]+(?:\s+|$)|[^.!?]+$/g;
+  return text.match(regex) || [text];
+}
+
+function getPlaceholders(
+  text: string,
+): Array<{ text: string; start: number; end: number }> {
+  if (!text) return [];
+  const regex = /\[[^\]]+\]/g;
+  const matches: Array<{ text: string; start: number; end: number }> = [];
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    matches.push({ text: m[0], start: m.index, end: m.index + m[0].length });
+  }
+  return matches;
+}
+
+function expandDirection(text: string): string {
+  if (text.startsWith('=')) {
+    return `Rewrite with a ${text.slice(1)} tone`;
+  }
+  if (text.startsWith('+')) {
+    return `Add more detail about ${text.slice(1)}`;
+  }
+  if (text.startsWith('-')) {
+    return `Remove or reduce ${text.slice(1)}`;
+  }
+  return text;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 interface PathStep {
@@ -89,13 +119,16 @@ interface PathStep {
   nodeIndex: number;
 }
 
+type UIStep = 'intent' | 'paragraph' | 'refinement' | 'continuation';
+
 export const VibeInput: React.FC<VibeInputProps> = ({
   onSubmit,
   onCancel,
   inputWidth,
-  generateOptions,
+  vibeGenerator,
   conversationContext = '',
 }) => {
+  const [uiStep, setUiStep] = useState<UIStep>('intent');
   const [rootOptions, setRootOptions] = useState<VibeOption[] | null>(null);
   const [currentOptions, setCurrentOptions] = useState<VibeOption[]>([]);
   const [path, setPath] = useState<PathStep[]>([]);
@@ -109,31 +142,43 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   const [freeText, setFreeText] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Keep mutable refs for use inside async callbacks where stale closure
-  // would otherwise read outdated state.
+  // New states for Draft & Refine
+  const [currentParagraph, setCurrentParagraph] = useState<string | null>(null);
+  const [activeSentenceIdx, setActiveSentenceIdx] = useState(-1);
+  const [activePlaceholderIdx, setActivePlaceholderIdx] = useState(-1);
+  const [refinements, setRefinements] = useState<Array<{ label: string }>>([]);
+  const [continuations, setContinuations] = useState<
+    Array<{ label: string; chunk: string }>
+  >([]);
+  const [refinementLoading, setRefinementLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Keep mutable refs for use inside async callbacks
   const pathRef = useRef(path);
   pathRef.current = path;
   const rootOptionsRef = useRef(rootOptions);
   rootOptionsRef.current = rootOptions;
 
-  // Abort controller for in-flight generateOptions calls.
-  // Cancelled on unmount and on each new prefetch that replaces a prior one.
+  // Abort controller for in-flight calls
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(() => () => {
+  useEffect(
+    () => () => {
       abortControllerRef.current?.abort();
-    }, []);
+    },
+    [],
+  );
 
   // ── Spinner ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!initialLoading && !waitingForChildren) return;
+    if (!initialLoading && !waitingForChildren && !loading) return;
     const id = setInterval(
       () => setSpinFrame((f) => (f + 1) % SPIN.length),
       80,
     );
     return () => clearInterval(id);
-  }, [initialLoading, waitingForChildren]);
+  }, [initialLoading, waitingForChildren, loading]);
 
   // ── Prefetch ─────────────────────────────────────────────────────────────
 
@@ -150,15 +195,11 @@ export const VibeInput: React.FC<VibeInputProps> = ({
 
       const ac = new AbortController();
       abortControllerRef.current = ac;
-      opt._fetchPromise = generateOptions(
-        pathContext,
-        conversationContext,
-        ac.signal,
-      )
+      opt._fetchPromise = vibeGenerator
+        .generateOptions(pathContext, conversationContext, ac.signal)
         .then((children) => {
           opt._children = children;
           opt._loading = false;
-          // Nudge a re-render to update the loading indicator.
           setCurrentOptions((prev) => [...prev]);
         })
         .catch(() => {
@@ -167,18 +208,16 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           setCurrentOptions((prev) => [...prev]);
         });
     },
-    [generateOptions, conversationContext],
+    [vibeGenerator, conversationContext],
   );
 
   // ── Initial load ─────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const seedContext = conversationContext
-      ? [{ label: conversationContext }]
-      : [];
     const ac = new AbortController();
     abortControllerRef.current = ac;
-    generateOptions(seedContext, conversationContext, ac.signal)
+    vibeGenerator
+      .generateOptions([], conversationContext, ac.signal)
       .then((opts) => {
         setRootOptions(opts);
         setCurrentOptions(opts);
@@ -189,152 +228,452 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         setInitialLoading(false);
         setLoadError(err instanceof Error ? err.message : String(err));
       });
-    // Run once on mount only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [vibeGenerator, conversationContext, prefetchChildren]);
+
+  // ── Generation ───────────────────────────────────────────────────────────
+
+  const handleGenerateParagraph = useCallback(
+    async (comment = '', isContinuation = false) => {
+      const vi = variantIndices[activeIndex] ?? 0;
+      const variant = getVariant(currentOptions, activeIndex, vi);
+      if (!variant) return;
+
+      let targetSentence = '';
+      const sentences = getSentences(currentParagraph || '');
+      if (activeSentenceIdx !== -1) {
+        targetSentence = sentences[activeSentenceIdx] || '';
+      }
+
+      setLoading(true);
+      const ac = new AbortController();
+      abortControllerRef.current = ac;
+
+      try {
+        const text = await vibeGenerator.generateParagraph(
+          conversationContext,
+          variant.label,
+          comment,
+          targetSentence,
+          currentParagraph || '',
+          isContinuation,
+          ac.signal,
+        );
+
+        if (targetSentence && currentParagraph) {
+          // Surgical splice
+          const updated = currentParagraph.replace(targetSentence, text);
+          setCurrentParagraph(updated);
+        } else if (isContinuation && currentParagraph) {
+          setCurrentParagraph((prev) => (prev ? `${prev} ${text}` : text));
+        } else {
+          setCurrentParagraph(text);
+        }
+
+        setUiStep('paragraph');
+        setActiveSentenceIdx(-1);
+        setActivePlaceholderIdx(-1);
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          setLoadError(err.message);
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      activeIndex,
+      currentOptions,
+      variantIndices,
+      activeSentenceIdx,
+      currentParagraph,
+      vibeGenerator,
+      conversationContext,
+    ],
+  );
+
+  const handleFillPlaceholder = useCallback(
+    async (phText: string, roughValue: string) => {
+      if (!currentParagraph) return;
+      setLoading(true);
+      const ac = new AbortController();
+      abortControllerRef.current = ac;
+
+      try {
+        const refined = await vibeGenerator.fillPlaceholder(
+          currentParagraph,
+          phText,
+          roughValue,
+          ac.signal,
+        );
+        setCurrentParagraph(currentParagraph.replace(phText, refined));
+        setActivePlaceholderIdx(-1);
+        setUiStep('paragraph');
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          setLoadError(err.message);
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [currentParagraph, vibeGenerator],
+  );
+
+  // ── Suggestions ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (uiStep !== 'paragraph' || !currentParagraph || loading) return;
+
+    const ac = new AbortController();
+    abortControllerRef.current = ac;
+
+    if (activeSentenceIdx !== -1) {
+      // Fetch refinements for selected sentence
+      const sentences = getSentences(currentParagraph);
+      const target = sentences[activeSentenceIdx];
+      setRefinementLoading(true);
+      vibeGenerator
+        .generateRefinements(
+          conversationContext,
+          currentParagraph,
+          target,
+          ac.signal,
+        )
+        .then((res) => {
+          setRefinements(res);
+          setRefinementLoading(false);
+        })
+        .catch(() => setRefinementLoading(false));
+    } else if (activePlaceholderIdx === -1) {
+      // Fetch continuations for end cursor
+      const vi = variantIndices[activeIndex] ?? 0;
+      const variant = getVariant(currentOptions, activeIndex, vi);
+      setRefinementLoading(true);
+      vibeGenerator
+        .generateContinuations(
+          conversationContext,
+          currentParagraph,
+          variant?.label || '',
+          '',
+          ac.signal,
+        )
+        .then((res) => {
+          setContinuations(res);
+          setRefinementLoading(false);
+        })
+        .catch(() => setRefinementLoading(false));
+    }
+  }, [
+    uiStep,
+    currentParagraph,
+    activeSentenceIdx,
+    activePlaceholderIdx,
+    vibeGenerator,
+    conversationContext,
+    loading,
+    activeIndex,
+    currentOptions,
+    variantIndices,
+  ]);
 
   // ── Keyboard ─────────────────────────────────────────────────────────────
 
-  useInput((input, key) => {
-    if (initialLoading || loadError) return;
+  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState(0);
 
-    // ── Free text mode ──
-    if (freeMode) {
-      if (key.return) {
-        const trimmed = freeText.trim();
-        if (trimmed) onSubmit(trimmed);
-      } else if (key.escape) {
-        setFreeMode(false);
-        setFreeText('');
-      } else if (key.backspace || key.delete) {
-        setFreeText((t) => t.slice(0, -1));
-      } else if (input && !key.ctrl && !key.meta && input.length === 1) {
-        setFreeText((t) => t + input);
+  const handleKeyPress = useCallback(
+    (key: Key) => {
+      if (initialLoading || loadError || loading) return false;
+
+      // ── Free text mode / Direction mode ──
+      if (freeMode) {
+        const suggestions =
+          activeSentenceIdx !== -1
+            ? refinements
+            : activePlaceholderIdx === -1
+              ? continuations
+              : [];
+        const query = freeText.trim().toLowerCase();
+        const matches = query
+          ? suggestions.filter((s) => s.label.toLowerCase().includes(query))
+          : suggestions;
+
+        if (key.name === 'return' || key.sequence === '\r') {
+          const rawComment =
+            matches.length > 0 && activeSuggestionIdx < matches.length
+              ? matches[activeSuggestionIdx].label
+              : freeText.trim();
+
+          setFreeMode(false);
+          setFreeText('');
+          setActiveSuggestionIdx(0);
+
+          if (!rawComment) return true;
+
+          // Placeholder fill: [name]=rough value
+          const phs = getPlaceholders(currentParagraph || '');
+          const ph =
+            activePlaceholderIdx !== -1 ? phs[activePlaceholderIdx] : null;
+          if (ph && rawComment.includes('=')) {
+            const value = rawComment.split('=')[1] || '';
+            void handleFillPlaceholder(ph.text, value);
+            return true;
+          }
+
+          const comment = expandDirection(rawComment);
+          const isActuallyContinuing =
+            uiStep === 'paragraph' &&
+            activeSentenceIdx === -1 &&
+            activePlaceholderIdx === -1;
+
+          // If it was a continuation match, we might want to use the chunk directly
+          const match = matches.find((m) => m.label === rawComment);
+          if (isActuallyContinuing && match && 'chunk' in match) {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+            const chunk = (match as { chunk: string }).chunk;
+            setCurrentParagraph((prev: string | null) =>
+              prev ? `${prev} ${chunk}` : chunk,
+            );
+          } else {
+            void handleGenerateParagraph(comment, isActuallyContinuing);
+          }
+          return true;
+        } else if (key.name === 'tab') {
+          if (matches.length > 0) {
+            setFreeText(matches[activeSuggestionIdx].label);
+          }
+          return true;
+        } else if (key.name === 'up') {
+          setActiveSuggestionIdx((prev) =>
+            matches.length > 0
+              ? (prev - 1 + matches.length) % matches.length
+              : 0,
+          );
+          return true;
+        } else if (key.name === 'down') {
+          setActiveSuggestionIdx((prev) =>
+            matches.length > 0 ? (prev + 1) % matches.length : 0,
+          );
+          return true;
+        } else if (key.name === 'escape') {
+          setFreeMode(false);
+          setFreeText('');
+          setActiveSuggestionIdx(0);
+          return true;
+        } else if (key.name === 'backspace' || key.name === 'delete') {
+          setFreeText((t) => t.slice(0, -1));
+          setActiveSuggestionIdx(0);
+          return true;
+        } else if (
+          key.sequence &&
+          !key.ctrl &&
+          !key.meta &&
+          key.sequence.length === 1
+        ) {
+          setFreeText((t) => t + key.sequence);
+          setActiveSuggestionIdx(0);
+          return true;
+        }
+        return true; // Consume other keys in freeMode
       }
-      return;
-    }
 
-    if (waitingForChildren) return;
+      if (waitingForChildren) return false;
 
-    // Number jump
-    const num = parseInt(input, 10);
-    if (num >= 1 && num <= currentOptions.length) {
-      const newIdx = num - 1;
-      setActiveIndex(newIdx);
-      prefetchChildren(currentOptions, newIdx, path);
-      return;
-    }
+      // ── Paragraph Mode Navigation ──
+      if (uiStep === 'paragraph') {
+        const sentences = getSentences(currentParagraph || '');
+        const placeholders = getPlaceholders(currentParagraph || '');
 
-    if (key.upArrow || input === 'k') {
-      const newIdx = Math.max(0, activeIndex - 1);
-      setActiveIndex(newIdx);
-      prefetchChildren(currentOptions, newIdx, path);
-    } else if (key.downArrow || input === 'j') {
-      const newIdx = Math.min(currentOptions.length - 1, activeIndex + 1);
-      setActiveIndex(newIdx);
-      prefetchChildren(currentOptions, newIdx, path);
-    } else if (key.leftArrow || input === 'h') {
-      const opt = currentOptions[activeIndex];
-      if (opt) {
-        const total = opt.variants.length;
-        setVariantIndices((vi) => {
-          const next = [...vi];
-          next[activeIndex] = ((vi[activeIndex] ?? 0) - 1 + total) % total;
-          return next;
-        });
+        if (key.name === 'left' || key.sequence === 'h') {
+          setActivePlaceholderIdx(-1);
+          setActiveSentenceIdx((prev) =>
+            prev === -1 ? sentences.length - 1 : Math.max(0, prev - 1),
+          );
+          return true;
+        } else if (key.name === 'right' || key.sequence === 'l') {
+          setActivePlaceholderIdx(-1);
+          setActiveSentenceIdx((prev) =>
+            prev >= sentences.length - 1 ? -1 : prev + 1,
+          );
+          return true;
+        } else if (key.sequence === '[') {
+          setActiveSentenceIdx(-1);
+          if (placeholders.length > 0) {
+            setActivePlaceholderIdx((prev) => (prev + 1) % placeholders.length);
+          }
+          return true;
+        } else if (key.sequence === '/') {
+          setFreeMode(true);
+          const ph =
+            activePlaceholderIdx !== -1
+              ? placeholders[activePlaceholderIdx]
+              : null;
+          setFreeText(ph ? `${ph.text}=` : '');
+          return true;
+        } else if (key.name === 'return' || key.sequence === '\r') {
+          if (currentParagraph) onSubmit(currentParagraph);
+          return true;
+        } else if (key.name === 'escape') {
+          if (activeSentenceIdx !== -1 || activePlaceholderIdx !== -1) {
+            setActiveSentenceIdx(-1);
+            setActivePlaceholderIdx(-1);
+          } else {
+            setUiStep('intent');
+            setCurrentParagraph(null);
+          }
+          return true;
+        }
+        return true;
       }
-    } else if (key.rightArrow || input === 'l') {
-      const opt = currentOptions[activeIndex];
-      if (opt) {
-        const total = opt.variants.length;
-        setVariantIndices((vi) => {
-          const next = [...vi];
-          next[activeIndex] = ((vi[activeIndex] ?? 0) + 1) % total;
-          return next;
-        });
+
+      // ── Intent Mode (Original Tree) ──
+      // Number jump
+      const num = parseInt(key.sequence, 10);
+      if (!isNaN(num) && num >= 1 && num <= currentOptions.length) {
+        const newIdx = num - 1;
+        setActiveIndex(newIdx);
+        prefetchChildren(currentOptions, newIdx, path);
+        return true;
       }
-    } else if (key.tab) {
-      // Confirm block → advance depth
-      const vi = variantIndices[activeIndex] ?? 0;
-      const variant = getVariant(currentOptions, activeIndex, vi);
-      const opt = currentOptions[activeIndex];
-      if (!opt) return;
 
-      const newPath: PathStep[] = [
-        ...path,
-        {
-          label: variant.label,
-          payload: variant.payload,
-          nodeIndex: activeIndex,
-        },
-      ];
-      setPath(newPath);
-      setDepth((d) => d + 1);
+      if (key.name === 'up' || key.sequence === 'k') {
+        const newIdx = Math.max(0, activeIndex - 1);
+        setActiveIndex(newIdx);
+        prefetchChildren(currentOptions, newIdx, path);
+        return true;
+      } else if (key.name === 'down' || key.sequence === 'j') {
+        const newIdx = Math.min(currentOptions.length - 1, activeIndex + 1);
+        setActiveIndex(newIdx);
+        prefetchChildren(currentOptions, newIdx, path);
+        return true;
+      } else if (key.name === 'left' || key.sequence === 'h') {
+        const opt = currentOptions[activeIndex];
+        if (opt) {
+          const total = opt.variants.length;
+          setVariantIndices((vi) => {
+            const next = [...vi];
+            next[activeIndex] = ((vi[activeIndex] ?? 0) - 1 + total) % total;
+            return next;
+          });
+        }
+        return true;
+      } else if (key.name === 'right' || key.sequence === 'l') {
+        const opt = currentOptions[activeIndex];
+        if (opt) {
+          const total = opt.variants.length;
+          setVariantIndices((vi) => {
+            const next = [...vi];
+            next[activeIndex] = ((vi[activeIndex] ?? 0) + 1) % total;
+            return next;
+          });
+        }
+        return true;
+      } else if (key.name === 'tab') {
+        // Confirm block → advance depth
+        const vi = variantIndices[activeIndex] ?? 0;
+        const variant = getVariant(currentOptions, activeIndex, vi);
+        const opt = currentOptions[activeIndex];
+        if (!opt) return true;
 
-      if (opt._children?.length) {
-        setCurrentOptions(opt._children);
-        setActiveIndex(0);
-        setVariantIndices([0, 0, 0, 0]);
-        prefetchChildren(opt._children, 0, newPath);
-      } else {
-        setWaitingForChildren(true);
-        const settle =
-          opt._fetchPromise ??
-          (() => {
-            const ac = new AbortController();
-            abortControllerRef.current = ac;
-            return generateOptions(
+        const newPath: PathStep[] = [
+          ...path,
+          {
+            label: variant.label,
+            payload: variant.payload,
+            nodeIndex: activeIndex,
+          },
+        ];
+        setPath(newPath);
+        setDepth((d) => d + 1);
+
+        if (opt._children?.length) {
+          setCurrentOptions(opt._children);
+          setActiveIndex(0);
+          setVariantIndices([0, 0, 0, 0]);
+          prefetchChildren(opt._children, 0, newPath);
+        } else {
+          setWaitingForChildren(true);
+          const ac = new AbortController();
+          abortControllerRef.current = ac;
+          void vibeGenerator
+            .generateOptions(
               newPath.map((p) => ({ label: p.label })),
               conversationContext,
               ac.signal,
-            );
-          })().then((children) => {
-            opt._children = children;
-          });
-
-        settle
-          .then(() => {
-            setWaitingForChildren(false);
-            const children = opt._children ?? [];
-            setCurrentOptions(children);
-            setActiveIndex(0);
-            setVariantIndices([0, 0, 0, 0]);
-            if (children.length) prefetchChildren(children, 0, newPath);
-          })
-          .catch(() => {
-            // Roll back
-            setWaitingForChildren(false);
-            setPath(pathRef.current.slice(0, -1));
-            setDepth((d) => Math.max(0, d - 1));
-          });
-      }
-    } else if (key.return) {
-      // Send immediately (skip remaining depths)
-      const vi = variantIndices[activeIndex] ?? 0;
-      const variant = getVariant(currentOptions, activeIndex, vi);
-      onSubmit(variant.payload);
-    } else if (input === '/') {
-      setFreeMode(true);
-      setFreeText('');
-    } else if (key.escape) {
-      if (path.length > 0) {
-        // Navigate back one depth
-        const newPath = path.slice(0, -1);
-        setPath(newPath);
-        setDepth((d) => Math.max(0, d - 1));
-
-        // Walk the root tree to find the parent's option list
-        let opts = rootOptionsRef.current ?? [];
-        for (const step of newPath) {
-          opts = opts[step.nodeIndex]?._children ?? opts;
+            )
+            .then((children) => {
+              opt._children = children;
+              setWaitingForChildren(false);
+              setCurrentOptions(children);
+              setActiveIndex(0);
+              setVariantIndices([0, 0, 0, 0]);
+              if (children.length) prefetchChildren(children, 0, newPath);
+            })
+            .catch(() => {
+              setWaitingForChildren(false);
+              setPath(pathRef.current.slice(0, -1));
+              setDepth((d) => Math.max(0, d - 1));
+            });
         }
-        setCurrentOptions(opts);
-        setActiveIndex(0);
-        setVariantIndices([0, 0, 0, 0]);
-      } else {
-        onCancel();
+        return true;
+      } else if (key.name === 'return' || key.sequence === '\r') {
+        // Intent confirmed -> Generate Draft
+        void handleGenerateParagraph();
+        return true;
+      } else if (key.sequence === '/') {
+        setFreeMode(true);
+        setFreeText('');
+        return true;
+      } else if (key.name === 'escape') {
+        if (path.length > 0) {
+          const newPath = path.slice(0, -1);
+          setPath(newPath);
+          setDepth((d) => Math.max(0, d - 1));
+
+          let opts = rootOptionsRef.current ?? [];
+          for (const step of newPath) {
+            opts = opts[step.nodeIndex]?._children ?? opts;
+          }
+          setCurrentOptions(opts);
+          setActiveIndex(0);
+          setVariantIndices([0, 0, 0, 0]);
+        } else {
+          onCancel();
+        }
+        return true;
       }
-    }
+      return false;
+    },
+    [
+      initialLoading,
+      loadError,
+      loading,
+      freeMode,
+      activeSentenceIdx,
+      refinements,
+      activePlaceholderIdx,
+      continuations,
+      freeText,
+      activeSuggestionIdx,
+      currentParagraph,
+      uiStep,
+      handleFillPlaceholder,
+      handleGenerateParagraph,
+      waitingForChildren,
+      currentOptions,
+      activeIndex,
+      prefetchChildren,
+      path,
+      variantIndices,
+      vibeGenerator,
+      conversationContext,
+      onCancel,
+      onSubmit,
+    ],
+  );
+
+  useKeypress(handleKeyPress, {
+    isActive: true,
+    priority: KeypressPriority.High,
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -360,19 +699,145 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   }
 
   if (freeMode) {
+    const suggestions =
+      activeSentenceIdx !== -1
+        ? refinements
+        : activePlaceholderIdx === -1
+          ? continuations
+          : [];
+    const query = freeText.trim().toLowerCase();
+    const matches = query
+      ? suggestions.filter((s) => s.label.toLowerCase().includes(query))
+      : suggestions;
+
     return (
       <Box flexDirection="column">
-        <Text dimColor>Type your prompt:</Text>
+        <Text dimColor>Direction / Type your prompt:</Text>
         <Box>
           <Text color="magenta">❯ </Text>
           <Text color="white">{freeText}</Text>
           <Text>█</Text>
         </Box>
-        <Text dimColor>Enter send Esc back to suggestions</Text>
+
+        {refinementLoading && matches.length === 0 && (
+          <Box marginTop={1}>
+            <Text color="magenta">{SPIN[spinFrame]} </Text>
+            <Text dimColor>fetching suggestions...</Text>
+          </Box>
+        )}
+
+        {matches.length > 0 && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text dimColor>Suggestions (Tab to select, ↑/↓ navigate):</Text>
+            {matches.slice(0, 5).map((m, i) => (
+              <Box key={i}>
+                <Text color={i === activeSuggestionIdx ? 'cyan' : undefined}>
+                  {i === activeSuggestionIdx ? '▸' : ' '}
+                </Text>
+                <Text
+                  color={i === activeSuggestionIdx ? 'white' : 'gray'}
+                  bold={i === activeSuggestionIdx}
+                >
+                  {' '}
+                  {m.label}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        )}
+
+        <Box marginTop={1}>
+          <Text dimColor>Enter confirm Esc back</Text>
+        </Box>
       </Box>
     );
   }
 
+  if (loading) {
+    return (
+      <Box>
+        <Text color="magenta">{SPIN[spinFrame]} </Text>
+        <Text dimColor>generating draft...</Text>
+      </Box>
+    );
+  }
+
+  // ── Paragraph Render ──
+  if (uiStep === 'paragraph' && currentParagraph) {
+    const sentences = getSentences(currentParagraph);
+    const placeholders = getPlaceholders(currentParagraph);
+    const activePH =
+      activePlaceholderIdx !== -1 ? placeholders[activePlaceholderIdx] : null;
+
+    return (
+      <Box flexDirection="column" width={maxWidth}>
+        <Box marginBottom={1}>
+          <Text dimColor>Drafting Mode: </Text>
+          <Text color="magenta">
+            {activePH
+              ? 'placeholder selected'
+              : activeSentenceIdx === -1
+                ? 'continuing'
+                : 'refining sentence'}
+          </Text>
+        </Box>
+
+        <Box
+          flexDirection="column"
+          borderStyle="single"
+          borderColor="gray"
+          paddingX={1}
+        >
+          <Text>
+            {sentences.map((s, i) => {
+              const isSelected = i === activeSentenceIdx;
+              if (isSelected) {
+                return (
+                  <Text key={i} backgroundColor="magenta" color="white">
+                    {s}
+                  </Text>
+                );
+              }
+              // Check if sentence contains selected placeholder
+              if (activePH) {
+                const sStart = currentParagraph.indexOf(s);
+                const sEnd = sStart + s.length;
+                if (activePH.start >= sStart && activePH.end <= sEnd) {
+                  const before = currentParagraph.slice(sStart, activePH.start);
+                  const after = currentParagraph.slice(activePH.end, sEnd);
+                  return (
+                    <Text key={i} color="white">
+                      {before}
+                      <Text backgroundColor="yellow" color="black">
+                        {activePH.text}
+                      </Text>
+                      {after}
+                    </Text>
+                  );
+                }
+              }
+              return (
+                <Text key={i} color="white" dimColor={activeSentenceIdx !== -1}>
+                  {s}
+                </Text>
+              );
+            })}
+            {activeSentenceIdx === -1 && activePlaceholderIdx === -1 && (
+              <Text color="cyan">▌</Text>
+            )}
+          </Text>
+        </Box>
+
+        <Box marginTop={1}>
+          <Text dimColor>
+            h/l nav sentences [ nav placeholders / refine Enter send Esc back
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  // ── Intent Render ──
   const activeVariant = getVariant(
     currentOptions,
     activeIndex,
@@ -413,7 +878,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           {/* Payload preview */}
           {activeVariant.payload && (
             <Box flexDirection="column" marginBottom={1}>
-              <Text dimColor>┄┄ will send →</Text>
+              <Text dimColor>┄┄ will draft →</Text>
               {wrapText(activeVariant.payload, MAX_PAYLOAD_LINE).map(
                 (line, i) => (
                   <Text key={i} dimColor>
@@ -463,7 +928,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           {/* Controls hint */}
           <Box marginTop={1} flexWrap="wrap">
             <Text dimColor>
-              j/k nav h/l variants Tab confirm Enter send / type Esc back
+              j/k nav h/l variants Tab confirm Enter draft / type Esc back
             </Text>
           </Box>
         </>

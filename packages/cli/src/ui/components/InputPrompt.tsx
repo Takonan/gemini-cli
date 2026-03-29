@@ -242,7 +242,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     shortcutsHelpVisible,
   } = useUIState();
   const [vibeModeActive, setVibeModeActive] = useState(false);
-  const generateVibeOptions = useMemo(
+  const vibeGenerator = useMemo(
     () => makeVibeGenerator(config.getBaseLlmClient()),
     [config],
   );
@@ -871,13 +871,17 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         return true;
       }
 
-      if (
-        keyMatchers[Command.TOGGLE_VIBE_MODE](key) &&
-        !shellModeActive &&
-        streamingState === StreamingState.Idle
-      ) {
-        setVibeModeActive((v) => !v);
+      if (keyMatchers[Command.TOGGLE_VIBE_MODE](key) && !shellModeActive) {
+        if (streamingState === StreamingState.Idle) {
+          setVibeModeActive((v) => !v);
+        }
+        // Always consume Ctrl+Space so the raw sequence never falls through
+        // to the text buffer (e.g. during streaming when the toggle is skipped).
         return true;
+      }
+
+      if (vibeModeActive) {
+        return false;
       }
 
       if (keyMatchers[Command.ESCAPE](key)) {
@@ -1353,6 +1357,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       setEmbeddedShellFocused,
       backgroundShells.size,
       backgroundShellHeight,
+      vibeModeActive,
       streamingState,
       handleEscPress,
       registerPlainTabPress,
@@ -1368,7 +1373,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   );
 
   useKeypress(handleInput, {
-    isActive: !isEmbeddedShellFocused && !vibeModeActive,
+    isActive: !isEmbeddedShellFocused,
     priority: true,
   });
 
@@ -1576,11 +1581,11 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
           <VibeInput
             onSubmit={(value) => {
               setVibeModeActive(false);
-              onSubmit(value);
+              handleSubmit(value);
             }}
             onCancel={() => setVibeModeActive(false)}
             inputWidth={inputWidth}
-            generateOptions={generateVibeOptions}
+            vibeGenerator={vibeGenerator}
             conversationContext={vibeContext}
           />
         </Box>
