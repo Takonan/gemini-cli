@@ -1593,6 +1593,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             vibeGenerator={vibeGenerator}
             conversationContext={vibeContext}
             workspaceContext={workspaceContext}
+            config={config}
           />
         </Box>
       </HalfLinePaddedBox>

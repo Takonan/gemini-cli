@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import type { BaseLlmClient } from '@google/gemini-cli-core';
 import { LlmRole } from '@google/gemini-cli-core';
 import type { VibeOption } from '../components/VibeInput.js';
@@ -141,6 +143,24 @@ function buildOptionsPrompt(
     `Each option has a primary version plus ${NUM_VARIANTS - 1} alternate phrasings (variants). ` +
     `Payloads should be complete, standalone prompt sentences the user will send to an AI.`
   );
+}
+
+function summarizeFile(fileName: string, content: string): string {
+  const lines = content.split('\n');
+  if (lines.length <= 100) return content;
+
+  const imports = lines
+    .filter((l) => l.startsWith('import '))
+    .slice(0, 10)
+    .join('\n');
+  const exports = lines
+    .filter((l) => l.includes('export '))
+    .slice(0, 10)
+    .join('\n');
+  const head = lines.slice(0, 20).join('\n');
+  const tail = lines.slice(-20).join('\n');
+
+  return `[File: ${fileName} (Truncated)]\n${imports}\n\n${exports}\n\n${head}\n...\n${tail}`;
 }
 
 function buildRefinementsPrompt(
@@ -297,6 +317,7 @@ export interface VibeGenerator {
     isContinuation?: boolean,
     abortSignal?: AbortSignal,
     workspaceContext?: string,
+    projectRoot?: string,
   ) => Promise<string>;
   fillPlaceholder: (
     paragraph: string,
@@ -422,7 +443,37 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
       isContinuation,
       abortSignal,
       workspaceContext,
+      projectRoot,
     ) => {
+      // Resolve @-mentions in the comment or intent label
+      let resolvedWsContext = workspaceContext || '';
+      const mentionRegex = /@([\w/.-]+)/g;
+      const mentions = new Set<string>();
+      let m;
+      if (comment) {
+        while ((m = mentionRegex.exec(comment)) !== null) mentions.add(m[1]);
+      }
+      if (intentLabel) {
+        while ((m = mentionRegex.exec(intentLabel)) !== null)
+          mentions.add(m[1]);
+      }
+
+      if (mentions.size > 0 && projectRoot) {
+        resolvedWsContext += '\n\nReferenced Files:\n';
+        for (const mention of mentions) {
+          const filePath = path.resolve(projectRoot, mention);
+          try {
+            if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+              const content = fs.readFileSync(filePath, 'utf8');
+              const summary = summarizeFile(mention, content);
+              resolvedWsContext += `--- ${mention} ---\n${summary}\n`;
+            }
+          } catch {
+            // Skip unreadable files
+          }
+        }
+      }
+
       const prompt = buildParagraphPrompt(
         convContext,
         intentLabel,
@@ -430,7 +481,7 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
         targetSentence,
         fullContext,
         isContinuation,
-        workspaceContext,
+        resolvedWsContext,
       );
       const schema = isContinuation ? VIBE_CHUNK_SCHEMA : VIBE_TEXT_SCHEMA;
 

@@ -9,6 +9,12 @@ import { Box, Text } from 'ink';
 import type { VibeGenerator } from '../utils/vibeGenerate.js';
 import { useKeypress, type Key } from '../hooks/useKeypress.js';
 import { KeypressPriority } from '../contexts/KeypressContext.js';
+import {
+  FileSearchFactory,
+  FileDiscoveryService,
+  type Config,
+  type FileSearch,
+} from '@google/gemini-cli-core';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +51,10 @@ export interface VibeInputProps {
    * Brief summary of workspace state (git status, files) to seed suggestions.
    */
   workspaceContext?: string;
+  /**
+   * Project configuration for file searching and @-mention resolution.
+   */
+  config?: Config;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -52,6 +62,77 @@ export interface VibeInputProps {
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const DEPTH_LABELS = ['intent', 'target', 'action', 'detail'];
 const MAX_PAYLOAD_LINE = 66;
+
+// ─── Components ──────────────────────────────────────────────────────────────
+
+const StyledPrompt: React.FC<{
+  text: string;
+  dimColor?: boolean;
+  activeSentenceIdx?: number;
+  activePlaceholderIdx?: number;
+}> = ({ text, dimColor, activeSentenceIdx, activePlaceholderIdx }) => {
+  if (!text) return null;
+
+  // Split into sentences first to handle highlighting
+  const sentences = getSentences(text);
+  const placeholders = getPlaceholders(text);
+  const activePH =
+    activePlaceholderIdx !== undefined && activePlaceholderIdx !== -1
+      ? placeholders[activePlaceholderIdx]
+      : null;
+
+  return (
+    <Text>
+      {sentences.map((s, i) => {
+        const isSelected = i === activeSentenceIdx;
+        if (isSelected) {
+          return (
+            <Text key={i} backgroundColor="magenta" color="white">
+              {s}
+            </Text>
+          );
+        }
+
+        // Tokenize sentence for mentions and placeholders
+        const sStart = text.indexOf(s);
+
+        const parts = s.split(/(@[\w/.-]+|\[[^\]]+\])/g);
+
+        return (
+          <Text key={i} color="white" dimColor={dimColor}>
+            {parts.map((part, pi) => {
+              if (part.startsWith('@')) {
+                return (
+                  <Text key={pi} backgroundColor="cyan" color="black">
+                    {part}
+                  </Text>
+                );
+              }
+              if (part.startsWith('[')) {
+                const isPHActive =
+                  activePH &&
+                  text.indexOf(part, sStart) >= activePH.start &&
+                  text.indexOf(part, sStart) + part.length <= activePH.end;
+
+                return (
+                  <Text
+                    key={pi}
+                    color={isPHActive ? 'black' : 'yellow'}
+                    backgroundColor={isPHActive ? 'yellow' : undefined}
+                    bold
+                  >
+                    {part}
+                  </Text>
+                );
+              }
+              return <Text key={pi}>{part}</Text>;
+            })}
+          </Text>
+        );
+      })}
+    </Text>
+  );
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -132,6 +213,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   vibeGenerator,
   conversationContext = '',
   workspaceContext = '',
+  config,
 }) => {
   const [uiStep, setUiStep] = useState<UIStep>('intent');
   const [rootOptions, setRootOptions] = useState<VibeOption[] | null>(null);
@@ -157,6 +239,54 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   >([]);
   const [refinementLoading, setRefinementLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Mention autocomplete state
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [fileSuggestions, setFileSuggestions] = useState<string[]>([]);
+  const [activeMentionIdx, setActiveMentionIdx] = useState(0);
+  const fileSearchEngine = useRef<FileSearch | null>(null);
+
+  // Initialize file search engine for mentions
+  useEffect(() => {
+    if (!config) return;
+    const projectRoot = config.getWorkspaceContext().getDirectories()[0] ?? '.';
+    const engine = FileSearchFactory.create({
+      projectRoot,
+      ignoreDirs: [],
+      fileDiscoveryService: new FileDiscoveryService(
+        projectRoot,
+        config.getFileFilteringOptions(),
+      ),
+      cache: true,
+      cacheTtl: 60,
+      enableRecursiveFileSearch: true,
+      enableFuzzySearch: true,
+    });
+    void engine.initialize().then(() => {
+      fileSearchEngine.current = engine;
+    });
+  }, [config]);
+
+  // Handle mention search
+  useEffect(() => {
+    if (mentionQuery === null || !fileSearchEngine.current) {
+      setFileSuggestions([]);
+      return;
+    }
+
+    const ac = new AbortController();
+    void fileSearchEngine.current
+      .search(mentionQuery || '*', {
+        signal: ac.signal,
+        maxResults: 5,
+      })
+      .then((results) => {
+        setFileSuggestions(results);
+        setActiveMentionIdx(0);
+      });
+
+    return () => ac.abort();
+  }, [mentionQuery]);
 
   // Keep mutable refs for use inside async callbacks
   const pathRef = useRef(path);
@@ -259,6 +389,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       abortControllerRef.current = ac;
 
       try {
+        const projectRoot = config?.getWorkspaceContext().getDirectories()[0];
         const text = await vibeGenerator.generateParagraph(
           conversationContext,
           variant.label,
@@ -268,6 +399,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           isContinuation,
           ac.signal,
           workspaceContext,
+          projectRoot,
         );
 
         if (targetSentence && currentParagraph) {
@@ -300,6 +432,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       vibeGenerator,
       conversationContext,
       workspaceContext,
+      config,
     ],
   );
 
@@ -402,6 +535,67 @@ export const VibeInput: React.FC<VibeInputProps> = ({
 
       // ── Free text mode / Direction mode ──
       if (freeMode) {
+        // Handle mention autocomplete selection
+        if (mentionQuery !== null) {
+          if (
+            key.name === 'return' ||
+            key.sequence === '\r' ||
+            key.name === 'tab'
+          ) {
+            if (fileSuggestions.length > 0) {
+              const selected = fileSuggestions[activeMentionIdx];
+              // Replace current mention query with the full file path
+              const lastAtIndex = freeText.lastIndexOf('@');
+              const prefix = freeText.slice(0, lastAtIndex);
+              setFreeText(prefix + '@' + selected + ' ');
+              setMentionQuery(null);
+              return true;
+            }
+          } else if (key.name === 'up') {
+            setActiveMentionIdx((prev) =>
+              fileSuggestions.length > 0
+                ? (prev - 1 + fileSuggestions.length) % fileSuggestions.length
+                : 0,
+            );
+            return true;
+          } else if (key.name === 'down') {
+            setActiveMentionIdx((prev) =>
+              fileSuggestions.length > 0
+                ? (prev + 1) % fileSuggestions.length
+                : 0,
+            );
+            return true;
+          } else if (key.name === 'escape') {
+            setMentionQuery(null);
+            return true;
+          } else if (key.name === 'backspace' || key.name === 'delete') {
+            const nextText = freeText.slice(0, -1);
+            setFreeText(nextText);
+            const lastAtIndex = nextText.lastIndexOf('@');
+            if (
+              lastAtIndex === -1 ||
+              nextText.slice(lastAtIndex).includes(' ')
+            ) {
+              setMentionQuery(null);
+            } else {
+              setMentionQuery(nextText.slice(lastAtIndex + 1));
+            }
+            return true;
+          } else if (
+            key.sequence &&
+            !key.ctrl &&
+            !key.cmd &&
+            key.sequence.length === 1
+          ) {
+            const nextText = freeText + key.sequence;
+            setFreeText(nextText);
+            const lastAtIndex = nextText.lastIndexOf('@');
+            setMentionQuery(nextText.slice(lastAtIndex + 1));
+            return true;
+          }
+          return true;
+        }
+
         const suggestions =
           activeSentenceIdx !== -1
             ? refinements
@@ -485,6 +679,9 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           !key.cmd &&
           key.sequence.length === 1
         ) {
+          if (key.sequence === '@') {
+            setMentionQuery('');
+          }
           setFreeText((t) => t + key.sequence);
           setActiveSuggestionIdx(0);
           return true;
@@ -686,6 +883,9 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       workspaceContext,
       onCancel,
       onSubmit,
+      mentionQuery,
+      fileSuggestions,
+      activeMentionIdx,
     ],
   );
 
@@ -733,18 +933,43 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         <Text dimColor>Direction / Type your prompt:</Text>
         <Box>
           <Text color="magenta">❯ </Text>
-          <Text color="white">{freeText}</Text>
+          <StyledPrompt text={freeText} />
           <Text>█</Text>
         </Box>
 
-        {refinementLoading && matches.length === 0 && (
+        {mentionQuery !== null && fileSuggestions.length > 0 && (
+          <Box
+            flexDirection="column"
+            marginTop={1}
+            borderStyle="round"
+            borderColor="cyan"
+            paddingX={1}
+          >
+            <Text color="cyan" bold>
+              Files (@):
+            </Text>
+            {fileSuggestions.map((file, i) => (
+              <Box key={file}>
+                <Text color={i === activeMentionIdx ? 'cyan' : undefined}>
+                  {i === activeMentionIdx ? '▸' : ' '}
+                </Text>
+                <Text color={i === activeMentionIdx ? 'white' : 'gray'}>
+                  {' '}
+                  @{file}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        )}
+
+        {mentionQuery === null && refinementLoading && matches.length === 0 && (
           <Box marginTop={1}>
             <Text color="magenta">{SPIN[spinFrame]} </Text>
             <Text dimColor>fetching suggestions...</Text>
           </Box>
         )}
 
-        {matches.length > 0 && (
+        {mentionQuery === null && matches.length > 0 && (
           <Box flexDirection="column" marginTop={1}>
             <Text dimColor>Suggestions (Tab to select, ↑/↓ navigate):</Text>
             {matches.slice(0, 5).map((m, i) => (
@@ -782,17 +1007,12 @@ export const VibeInput: React.FC<VibeInputProps> = ({
 
   // ── Paragraph Render ──
   if (uiStep === 'paragraph' && currentParagraph) {
-    const sentences = getSentences(currentParagraph);
-    const placeholders = getPlaceholders(currentParagraph);
-    const activePH =
-      activePlaceholderIdx !== -1 ? placeholders[activePlaceholderIdx] : null;
-
     return (
       <Box flexDirection="column" width={maxWidth}>
         <Box marginBottom={1}>
           <Text dimColor>Drafting Mode: </Text>
           <Text color="magenta">
-            {activePH
+            {activePlaceholderIdx !== -1
               ? 'placeholder selected'
               : activeSentenceIdx === -1
                 ? 'continuing'
@@ -806,44 +1026,17 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           borderColor="gray"
           paddingX={1}
         >
-          <Text>
-            {sentences.map((s, i) => {
-              const isSelected = i === activeSentenceIdx;
-              if (isSelected) {
-                return (
-                  <Text key={i} backgroundColor="magenta" color="white">
-                    {s}
-                  </Text>
-                );
-              }
-              // Check if sentence contains selected placeholder
-              if (activePH) {
-                const sStart = currentParagraph.indexOf(s);
-                const sEnd = sStart + s.length;
-                if (activePH.start >= sStart && activePH.end <= sEnd) {
-                  const before = currentParagraph.slice(sStart, activePH.start);
-                  const after = currentParagraph.slice(activePH.end, sEnd);
-                  return (
-                    <Text key={i} color="white">
-                      {before}
-                      <Text backgroundColor="yellow" color="black">
-                        {activePH.text}
-                      </Text>
-                      {after}
-                    </Text>
-                  );
-                }
-              }
-              return (
-                <Text key={i} color="white" dimColor={activeSentenceIdx !== -1}>
-                  {s}
-                </Text>
-              );
-            })}
+          <Box>
+            <StyledPrompt
+              text={currentParagraph}
+              activeSentenceIdx={activeSentenceIdx}
+              activePlaceholderIdx={activePlaceholderIdx}
+              dimColor={activeSentenceIdx !== -1}
+            />
             {activeSentenceIdx === -1 && activePlaceholderIdx === -1 && (
               <Text color="cyan">▌</Text>
             )}
-          </Text>
+          </Box>
         </Box>
 
         <Box marginTop={1}>
