@@ -41,6 +41,10 @@ export interface VibeInputProps {
    * plain string. Used to seed context-relevant root suggestions.
    */
   conversationContext?: string;
+  /**
+   * Brief summary of workspace state (git status, files) to seed suggestions.
+   */
+  workspaceContext?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -127,6 +131,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   inputWidth,
   vibeGenerator,
   conversationContext = '',
+  workspaceContext = '',
 }) => {
   const [uiStep, setUiStep] = useState<UIStep>('intent');
   const [rootOptions, setRootOptions] = useState<VibeOption[] | null>(null);
@@ -196,7 +201,12 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       const ac = new AbortController();
       abortControllerRef.current = ac;
       opt._fetchPromise = vibeGenerator
-        .generateOptions(pathContext, conversationContext, ac.signal)
+        .generateOptions(
+          pathContext,
+          conversationContext,
+          ac.signal,
+          workspaceContext,
+        )
         .then((children) => {
           opt._children = children;
           opt._loading = false;
@@ -208,7 +218,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           setCurrentOptions((prev) => [...prev]);
         });
     },
-    [vibeGenerator, conversationContext],
+    [vibeGenerator, conversationContext, workspaceContext],
   );
 
   // ── Initial load ─────────────────────────────────────────────────────────
@@ -217,7 +227,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     const ac = new AbortController();
     abortControllerRef.current = ac;
     vibeGenerator
-      .generateOptions([], conversationContext, ac.signal)
+      .generateOptions([], conversationContext, ac.signal, workspaceContext)
       .then((opts) => {
         setRootOptions(opts);
         setCurrentOptions(opts);
@@ -228,7 +238,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         setInitialLoading(false);
         setLoadError(err instanceof Error ? err.message : String(err));
       });
-  }, [vibeGenerator, conversationContext, prefetchChildren]);
+  }, [vibeGenerator, conversationContext, workspaceContext, prefetchChildren]);
 
   // ── Generation ───────────────────────────────────────────────────────────
 
@@ -257,6 +267,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           currentParagraph || '',
           isContinuation,
           ac.signal,
+          workspaceContext,
         );
 
         if (targetSentence && currentParagraph) {
@@ -288,6 +299,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       currentParagraph,
       vibeGenerator,
       conversationContext,
+      workspaceContext,
     ],
   );
 
@@ -304,6 +316,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           phText,
           roughValue,
           ac.signal,
+          workspaceContext,
         );
         setCurrentParagraph(currentParagraph.replace(phText, refined));
         setActivePlaceholderIdx(-1);
@@ -316,7 +329,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         setLoading(false);
       }
     },
-    [currentParagraph, vibeGenerator],
+    [currentParagraph, vibeGenerator, workspaceContext],
   );
 
   // ── Suggestions ──────────────────────────────────────────────────────────
@@ -338,6 +351,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           currentParagraph,
           target,
           ac.signal,
+          workspaceContext,
         )
         .then((res) => {
           setRefinements(res);
@@ -356,6 +370,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
           variant?.label || '',
           '',
           ac.signal,
+          workspaceContext,
         )
         .then((res) => {
           setContinuations(res);
@@ -370,6 +385,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     activePlaceholderIdx,
     vibeGenerator,
     conversationContext,
+    workspaceContext,
     loading,
     activeIndex,
     currentOptions,
@@ -599,6 +615,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
               newPath.map((p) => ({ label: p.label })),
               conversationContext,
               ac.signal,
+              workspaceContext,
             )
             .then((children) => {
               opt._children = children;
@@ -666,6 +683,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       variantIndices,
       vibeGenerator,
       conversationContext,
+      workspaceContext,
       onCancel,
       onSubmit,
     ],

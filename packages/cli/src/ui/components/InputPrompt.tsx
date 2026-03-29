@@ -85,6 +85,7 @@ import {
   makeVibeGenerator,
   extractConversationContext,
 } from '../utils/vibeGenerate.js';
+import { getWorkspaceContext } from '../utils/workspaceContext.js';
 
 /**
  * Returns if the terminal can be trusted to handle paste events atomically
@@ -250,6 +251,10 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     () => extractConversationContext(history),
     // Snapshot conversation at the moment vibe mode opens, not on every turn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    [vibeModeActive],
+  );
+  const workspaceContext = useMemo(
+    () => (vibeModeActive ? getWorkspaceContext() : ''),
     [vibeModeActive],
   );
 
@@ -1587,6 +1592,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             inputWidth={inputWidth}
             vibeGenerator={vibeGenerator}
             conversationContext={vibeContext}
+            workspaceContext={workspaceContext}
           />
         </Box>
       </HalfLinePaddedBox>

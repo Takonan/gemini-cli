@@ -118,6 +118,7 @@ const VIBE_CHUNK_SCHEMA: Record<string, unknown> = {
 function buildOptionsPrompt(
   pathContext: Array<{ label: string }>,
   convContext: string,
+  workspaceContext?: string,
 ): string {
   const isRoot = pathContext.length === 0;
   const pathLine = isRoot
@@ -126,13 +127,17 @@ function buildOptionsPrompt(
   const convLine = convContext
     ? `\nConversation context:\n${convContext}\n`
     : '';
+  const wsLine =
+    isRoot && workspaceContext
+      ? `\nWorkspace context (git status/files):\n${workspaceContext}\n`
+      : '';
 
   return (
     `You help users compose detailed prompts for AI coding assistants via a ` +
-    `menu interface.${convLine}${pathLine}\n\n` +
+    `menu interface.${convLine}${wsLine}${pathLine}\n\n` +
     `Generate exactly ${NUM_OPTIONS} distinct ` +
     `${isRoot ? 'top-level intent' : 'follow-up refinement'} options` +
-    `${convContext && isRoot ? ' relevant to the conversation context above' : ''}. ` +
+    `${(convContext || workspaceContext) && isRoot ? ' relevant to the conversation and workspace context above' : ''}. ` +
     `Each option has a primary version plus ${NUM_VARIANTS - 1} alternate phrasings (variants). ` +
     `Payloads should be complete, standalone prompt sentences the user will send to an AI.`
   );
@@ -142,16 +147,20 @@ function buildRefinementsPrompt(
   convContext: string,
   paragraph: string,
   targetSentence?: string,
+  workspaceContext?: string,
 ): string {
   const contextLine = convContext
     ? `Conversation context: ${convContext}\n`
+    : '';
+  const wsLine = workspaceContext
+    ? `Workspace context: ${workspaceContext}\n`
     : '';
   const targetLine = targetSentence
     ? `Target Sentence to improve: "${targetSentence.trim()}"\n`
     : '';
 
   return (
-    `AI prompt editor.${contextLine}\nDraft: "${paragraph}"\n${targetLine}\n` +
+    `AI prompt editor.${contextLine}${wsLine}\nDraft: "${paragraph}"\n${targetLine}\n` +
     `Generate 6 short, specific editorial directions to improve this prompt. ` +
     `Make each direction concrete and different (tone, content, structure, specificity, etc.). ` +
     `Examples: "Add a specific file path", "Make it more concise", "Lead with a clear goal", "Mention a specific library", "More conversational tone".`
@@ -163,14 +172,18 @@ function buildContinuationsPrompt(
   draft: string,
   intentLabel: string,
   comment?: string,
+  workspaceContext?: string,
 ): string {
   const contextLine = convContext
     ? `Conversation context: ${convContext}\n`
     : '';
+  const wsLine = workspaceContext
+    ? `Workspace context: ${workspaceContext}\n`
+    : '';
   const directionLine = comment ? `Direction: ${comment}\n` : '';
 
   return (
-    `AI prompt drafting.${contextLine}\nCurrent draft: "${draft}"\n` +
+    `AI prompt drafting.${contextLine}${wsLine}\nCurrent draft: "${draft}"\n` +
     `Angle: ${intentLabel}\n${directionLine}\n` +
     `Generate 5 distinct options for the NEXT 1-2 sentences of this AI prompt. ` +
     `Each with a specific short label and actual prose.`
@@ -184,13 +197,18 @@ function buildParagraphPrompt(
   targetSentence?: string,
   fullContext?: string,
   isContinuation?: boolean,
+  workspaceContext?: string,
 ): string {
   const contextLine = convContext
     ? `Conversation context: ${convContext}\n`
     : '';
+  const wsLine = workspaceContext
+    ? `Workspace context: ${workspaceContext}\n`
+    : '';
 
   if (targetSentence && fullContext) {
     return (
+      `AI prompt drafting.${contextLine}${wsLine}\n` +
       `Rewrite this single sentence from an AI coding assistant prompt.\n` +
       `Original sentence: "${targetSentence.trim()}"\nDirection: "${comment}"\n\n` +
       `Output ONLY the rewritten sentence. No preamble, no explanation, nothing else.`
@@ -199,7 +217,7 @@ function buildParagraphPrompt(
 
   if (fullContext && comment && !isContinuation) {
     return (
-      `AI prompt drafting.${contextLine}\nCurrent draft: "${fullContext}"\n` +
+      `AI prompt drafting.${contextLine}${wsLine}\nCurrent draft: "${fullContext}"\n` +
       `Direction: "${comment}"\n\n` +
       `TASK: Rewrite the draft incorporating the direction. Output ONLY the final prose. ` +
       `No preamble, no explanation, no quotes around it. ` +
@@ -209,7 +227,7 @@ function buildParagraphPrompt(
 
   if (isContinuation) {
     return (
-      `AI prompt drafting.${contextLine}\nCurrent draft: "${fullContext}"\n` +
+      `AI prompt drafting.${contextLine}${wsLine}\nCurrent draft: "${fullContext}"\n` +
       `Angle: ${intentLabel}\n${comment ? `Direction: ${comment}` : ''}\n\n` +
       `TASK: Write the next 1-2 sentences continuing the draft. Output ONLY the new sentences. No preamble, no explanation. ` +
       `Use [bracketed placeholders] like [variable name] if specific details are needed.`
@@ -217,7 +235,7 @@ function buildParagraphPrompt(
   }
 
   return (
-    `AI prompt drafting.${contextLine}\nAngle: ${intentLabel}\n` +
+    `AI prompt drafting.${contextLine}${wsLine}\nAngle: ${intentLabel}\n` +
     `${comment ? `Direction: ${comment}` : ''}\n\n` +
     `TASK: Write 1-2 opening sentences for this AI prompt. Output ONLY the prose. No preamble, no explanation. ` +
     `Use [bracketed placeholders] like [project description] or [framework] if specific details are needed.`
@@ -228,14 +246,18 @@ function buildPlaceholderPrompt(
   paragraph: string,
   phText: string,
   roughValue: string,
+  workspaceContext?: string,
 ): string {
   const idx = paragraph.indexOf(phText);
   const windowStart = Math.max(0, idx - 120);
   const windowEnd = Math.min(paragraph.length, idx + phText.length + 120);
   const context = paragraph.slice(windowStart, windowEnd);
+  const wsLine = workspaceContext
+    ? `Workspace context: ${workspaceContext}\n`
+    : '';
 
   return (
-    `AI prompt editing.\nContext: "...${context}..."\nPlaceholder: ${phText}\n` +
+    `AI prompt editing.\n${wsLine}Context: "...${context}..."\nPlaceholder: ${phText}\n` +
     `Rough value to express: "${roughValue}"\n\n` +
     `TASK: Output ONLY the replacement text — a word, phrase, or short clause that fits naturally where ${phText} appears. ` +
     `Polish the rough value into proper prompt language. No preamble, no full sentences unless the placeholder spans one.`
@@ -249,12 +271,14 @@ export interface VibeGenerator {
     pathContext: Array<{ label: string }>,
     convContext: string,
     abortSignal: AbortSignal,
+    workspaceContext?: string,
   ) => Promise<VibeOption[]>;
   generateRefinements: (
     convContext: string,
     paragraph: string,
     targetSentence?: string,
     abortSignal?: AbortSignal,
+    workspaceContext?: string,
   ) => Promise<Array<{ label: string }>>;
   generateContinuations: (
     convContext: string,
@@ -262,6 +286,7 @@ export interface VibeGenerator {
     intentLabel: string,
     comment?: string,
     abortSignal?: AbortSignal,
+    workspaceContext?: string,
   ) => Promise<Array<{ label: string; chunk: string }>>;
   generateParagraph: (
     convContext: string,
@@ -271,12 +296,14 @@ export interface VibeGenerator {
     fullContext?: string,
     isContinuation?: boolean,
     abortSignal?: AbortSignal,
+    workspaceContext?: string,
   ) => Promise<string>;
   fillPlaceholder: (
     paragraph: string,
     phText: string,
     roughValue: string,
     abortSignal?: AbortSignal,
+    workspaceContext?: string,
   ) => Promise<string>;
 }
 
@@ -285,8 +312,17 @@ export interface VibeGenerator {
  */
 export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
   return {
-    generateOptions: async (pathContext, convContext, abortSignal) => {
-      const prompt = buildOptionsPrompt(pathContext, convContext);
+    generateOptions: async (
+      pathContext,
+      convContext,
+      abortSignal,
+      workspaceContext,
+    ) => {
+      const prompt = buildOptionsPrompt(
+        pathContext,
+        convContext,
+        workspaceContext,
+      );
       const result = await baseLlmClient.generateJson({
         modelConfigKey: VIBE_MODEL_CONFIG_KEY,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -324,11 +360,13 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
       paragraph,
       targetSentence,
       abortSignal,
+      workspaceContext,
     ) => {
       const prompt = buildRefinementsPrompt(
         convContext,
         paragraph,
         targetSentence,
+        workspaceContext,
       );
       const result = await baseLlmClient.generateJson({
         modelConfigKey: VIBE_MODEL_CONFIG_KEY,
@@ -350,12 +388,14 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
       intentLabel,
       comment,
       abortSignal,
+      workspaceContext,
     ) => {
       const prompt = buildContinuationsPrompt(
         convContext,
         draft,
         intentLabel,
         comment,
+        workspaceContext,
       );
       const result = await baseLlmClient.generateJson({
         modelConfigKey: VIBE_MODEL_CONFIG_KEY,
@@ -381,6 +421,7 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
       fullContext,
       isContinuation,
       abortSignal,
+      workspaceContext,
     ) => {
       const prompt = buildParagraphPrompt(
         convContext,
@@ -389,6 +430,7 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
         targetSentence,
         fullContext,
         isContinuation,
+        workspaceContext,
       );
       const schema = isContinuation ? VIBE_CHUNK_SCHEMA : VIBE_TEXT_SCHEMA;
 
@@ -401,13 +443,23 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
         role: LlmRole.UTILITY_TOOL,
       });
 
-       
       const parsed = result as { text?: string; chunk?: string };
       return (parsed.text ?? parsed.chunk ?? '').trim();
     },
 
-    fillPlaceholder: async (paragraph, phText, roughValue, abortSignal) => {
-      const prompt = buildPlaceholderPrompt(paragraph, phText, roughValue);
+    fillPlaceholder: async (
+      paragraph,
+      phText,
+      roughValue,
+      abortSignal,
+      workspaceContext,
+    ) => {
+      const prompt = buildPlaceholderPrompt(
+        paragraph,
+        phText,
+        roughValue,
+        workspaceContext,
+      );
       const result = await baseLlmClient.generateJson({
         modelConfigKey: VIBE_MODEL_CONFIG_KEY,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -435,12 +487,30 @@ export function extractConversationContext(
   maxMessages = 6,
   maxCharsPerMessage = 300,
 ): string {
-  return history
-    .filter((item) => item.type === 'user' || item.type === 'gemini')
-    .slice(-maxMessages)
-    .map((item) => {
-      const role = item.type === 'user' ? 'user' : 'assistant';
-      const text = (item.text ?? '').slice(0, maxCharsPerMessage);
+  const filtered = history.filter(
+    (item) =>
+      item.type === 'user' ||
+      item.type === 'user_shell' ||
+      item.type === 'gemini' ||
+      item.type === 'gemini_content',
+  );
+  const recent = filtered.slice(-maxMessages);
+
+  return recent
+    .map((item, index) => {
+      const role =
+        item.type === 'user' || item.type === 'user_shell'
+          ? 'user'
+          : 'assistant';
+      const isLastAssistantMessage =
+        role === 'assistant' && index === recent.length - 1;
+
+      // Skip truncation for the very last assistant message so we don't
+      // cut off questions or options at the end.
+      const text = isLastAssistantMessage
+        ? (item.text ?? '')
+        : (item.text ?? '').slice(0, maxCharsPerMessage);
+
       return `${role}: ${text}`;
     })
     .join('\n');
