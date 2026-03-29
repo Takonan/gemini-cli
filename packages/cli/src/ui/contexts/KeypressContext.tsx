@@ -25,7 +25,7 @@ import { terminalCapabilityManager } from '../utils/terminalCapabilityManager.js
 import { useSettingsStore } from './SettingsContext.js';
 
 export const BACKSLASH_ENTER_TIMEOUT = 5;
-export const ESC_TIMEOUT = 50;
+export const ESC_TIMEOUT = 250;
 export const PASTE_TIMEOUT = 30_000;
 export const FAST_RETURN_TIMEOUT = 30;
 
@@ -565,7 +565,7 @@ function* emitKeys(
           if (match[1] === '27' && match[3] && match[4] === '~') {
             // modifyOtherKeys format: CSI 27 ; modifier ; key ~
             // Treat as CSI u: key + 'u'
-            code += match[3] + 'u';
+            code = '[' + match[3] + 'u';
             modifier = parseInt(match[2] ?? '1', 10) - 1;
           } else {
             code += match[1] + match[4];
@@ -573,7 +573,7 @@ function* emitKeys(
             modifier = parseInt(match[2] ?? '1', 10) - 1;
           }
         } else if ((match = /^(\d+)?(?:;(\d+))?([A-Za-z])$/.exec(cmd))) {
-          code += match[3];
+          code += match[3] || '';
           modifier = parseInt(match[2] ?? match[1] ?? '1', 10) - 1;
         } else {
           code += cmd;
@@ -664,8 +664,12 @@ function* emitKeys(
       alt = escaped;
       insertable = true;
     } else if (!escaped && ch <= '\x1a') {
-      // ctrl+letter
-      name = String.fromCharCode(ch.charCodeAt(0) + 'a'.charCodeAt(0) - 1);
+      // ctrl+letter (\x01–\x1a = Ctrl+A through Ctrl+Z)
+      // \x00 is Ctrl+Space / Ctrl+@ in legacy (non-Kitty) terminals
+      name =
+        ch === '\x00'
+          ? 'space'
+          : String.fromCharCode(ch.charCodeAt(0) + 'a'.charCodeAt(0) - 1);
       ctrl = true;
     } else if (/^[0-9A-Za-z]$/.exec(ch) !== null) {
       // Letter, number, shift+letter

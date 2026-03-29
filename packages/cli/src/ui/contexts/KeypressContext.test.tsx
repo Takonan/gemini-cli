@@ -364,6 +364,47 @@ describe('KeypressContext', () => {
         );
       });
     });
+
+    it('should emit individual characters if timeout occurs between ESC and [', async () => {
+      const keyHandler = vi.fn();
+      const { result } = await renderHookWithProviders(() =>
+        useKeypressContext(),
+      );
+      act(() => result.current.subscribe(keyHandler));
+
+      act(() => {
+        stdin.write('\x1b'); // ESC
+        vi.advanceTimersByTime(ESC_TIMEOUT + 10); // Timeout!
+      });
+
+      expect(keyHandler).toHaveBeenLastCalledWith(
+        expect.objectContaining({ name: 'escape' }),
+      );
+
+      act(() => {
+        stdin.write('[');
+      });
+
+      expect(keyHandler).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          name: '[',
+          insertable: true,
+          sequence: '[',
+        }),
+      );
+
+      act(() => {
+        stdin.write('3');
+      });
+
+      expect(keyHandler).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          name: '3',
+          insertable: true,
+          sequence: '3',
+        }),
+      );
+    });
   });
 
   describe('Tab, Backspace, and Space handling', () => {
@@ -1291,6 +1332,26 @@ describe('KeypressContext', () => {
     expect(keyHandler).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'a',
+      }),
+    );
+  });
+
+  it('should parse \\x00 (legacy Ctrl+Space) as {name: space, ctrl: true}', async () => {
+    const keyHandler = vi.fn();
+    const { result } = await renderHookWithProviders(() =>
+      useKeypressContext(),
+    );
+
+    act(() => result.current.subscribe(keyHandler));
+
+    // Legacy terminals (no Kitty / modifyOtherKeys) send \x00 for Ctrl+Space.
+    act(() => stdin.write('\x00'));
+
+    expect(keyHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'space',
+        ctrl: true,
+        insertable: false,
       }),
     );
   });
