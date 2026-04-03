@@ -139,7 +139,7 @@ describe('VibeInput Integration', () => {
     unmount();
   });
 
-  it('toggles vibe mode off with Ctrl+Space', async () => {
+  it('closes vibe mode with Escape', async () => {
     const { stdin, lastFrame, waitUntilReady, unmount } =
       await renderWithProviders(<InputPrompt {...props} />);
     await waitUntilReady();
@@ -153,11 +153,11 @@ describe('VibeInput Integration', () => {
       expect(lastFrame()).toContain('MOCK_VIBE_INPUT');
     });
 
-    // 2. Press Ctrl+Space again to toggle off.
-    // NOTE: This currently fails because InputPrompt's useKeypress is inactive
-    // when vibeModeActive is true.
+    // 2. Press Escape to close vibe mode.
+    // Ctrl+Space while vibe mode is active no longer toggles it off — instead
+    // it is handled by VibeInput's own handler to regenerate/clarify suggestions.
     await act(async () => {
-      stdin.write('\x1b[32;5u');
+      stdin.write('\x1b');
     });
 
     await waitFor(() => {

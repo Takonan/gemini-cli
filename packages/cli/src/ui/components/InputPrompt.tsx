@@ -882,11 +882,17 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
           if (!vibeModeActive) {
             // Capture draft text so VibeInput knows whether to use A or B mode
             setVibeDraft(buffer.text);
+            setVibeModeActive(true);
+            return true;
           }
-          setVibeModeActive((v) => !v);
+          // Vibe mode is already open — let VibeInput's own Ctrl+Space handler
+          // handle it (regenerate suggestions or clarify a highlighted option).
+          // Returning false lets the event fall through to ChoiceQuestionView's
+          // handler which subscribed more recently at the same High priority.
+          return false;
         }
-        // Always consume Ctrl+Space so the raw sequence never falls through
-        // to the text buffer (e.g. during streaming when the toggle is skipped).
+        // During streaming: consume to prevent the raw sequence from landing in
+        // the text buffer, but don't toggle (toggle is skipped during streaming).
         return true;
       }
 

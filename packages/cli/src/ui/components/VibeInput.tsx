@@ -116,7 +116,18 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   workspaceContext = '',
   initialDraft = '',
 }) => {
-  const isClaryMode = initialDraft.trim().length > 0;
+  // currentDraftRef holds the active draft — starts as initialDraft, updated
+  // when the user presses Ctrl+Space while typing in the freeform box.
+  const currentDraftRef = useRef(initialDraft);
+
+  // generationKey increments to trigger a fresh generation run.
+  const [generationKey, setGenerationKey] = useState(0);
+
+  // activeIsClaryMode tracks whether we are currently in clarify (B) mode.
+  const [activeIsClaryMode, setActiveIsClaryMode] = useState(
+    initialDraft.trim().length > 0,
+  );
+
   const [phase, setPhase] = useState<Phase>({ status: 'loading' });
 
   // Store clarifying questions for B mode assembly
@@ -124,19 +135,25 @@ export const VibeInput: React.FC<VibeInputProps> = ({
 
   // Abort on unmount
   const abortRef = useRef<AbortController>(new AbortController());
-  useEffect(() => () => {
+  useEffect(
+    () => () => {
       abortRef.current.abort();
-    }, []);
+    },
+    [],
+  );
 
-  // Generate questions on mount
+  // Generate questions whenever generationKey changes (initially 0 = first run).
   useEffect(() => {
     const ac = new AbortController();
     abortRef.current = ac;
 
+    const draft = currentDraftRef.current;
+    const isClary = draft.trim().length > 0;
+
     async function generate() {
-      if (isClaryMode) {
+      if (isClary) {
         const questions = await vibeGenerator.generateClarifyingQuestions(
-          initialDraft,
+          draft,
           conversationContext,
           workspaceContext,
           ac.signal,
@@ -167,7 +184,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
 
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [generationKey]);
 
   const handleCancel = useCallback(
     (key: Key) => {
@@ -188,9 +205,31 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     priority: KeypressPriority.High,
   });
 
+  /**
+   * Called when Ctrl+Space is pressed inside the suggestion dialog.
+   * - Without freeform text → regenerate a fresh batch of A-mode suggestions.
+   * - With freeform text → treat it as a draft and enter B-mode clarification.
+   */
+  const handleCtrlSpace = useCallback(
+    (freeformText?: string) => {
+      if (freeformText && freeformText.trim()) {
+        // Switch to B-mode clarification for the typed freeform text
+        currentDraftRef.current = freeformText;
+        setActiveIsClaryMode(true);
+      } else {
+        // Regenerate A-mode suggestions (reset draft)
+        currentDraftRef.current = initialDraft;
+        setActiveIsClaryMode(initialDraft.trim().length > 0);
+      }
+      setPhase({ status: 'loading' });
+      setGenerationKey((k) => k + 1);
+    },
+    [initialDraft],
+  );
+
   const handleDialogSubmit = useCallback(
     async (answers: Record<string, string>) => {
-      if (!isClaryMode) {
+      if (!activeIsClaryMode) {
         // A mode: the selected option IS the message
         const answer = answers[0] ?? '';
         if (answer.trim()) {
@@ -204,6 +243,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       // B mode: assemble a refined prompt from draft + answers
       setPhase({ status: 'assembling' });
 
+      const draft = currentDraftRef.current;
       const questions = clarifyingQuestionsRef.current;
       const questionAnswerPairs = questions
         .map((q, i) => ({
@@ -214,7 +254,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
 
       try {
         const refined = await vibeGenerator.assembleRefinedPrompt(
-          initialDraft,
+          draft,
           questionAnswerPairs,
           abortRef.current.signal,
         );
@@ -224,7 +264,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         if ((err as { name?: string }).name === 'AbortError') return;
         // Fallback: submit the draft with answers appended
         const fallback =
-          initialDraft.trim() +
+          draft.trim() +
           (questionAnswerPairs.length
             ? '\n\n' +
               questionAnswerPairs
@@ -234,7 +274,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         onSubmit(fallback);
       }
     },
-    [isClaryMode, initialDraft, vibeGenerator, onSubmit, onCancel],
+    [activeIsClaryMode, vibeGenerator, onSubmit, onCancel],
   );
 
   const handleDialogCancel = useCallback(() => {
@@ -246,7 +286,7 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       <Box paddingLeft={1}>
         <Spinner
           label={
-            isClaryMode
+            activeIsClaryMode
               ? 'generating clarifying questions...'
               : 'generating suggestions...'
           }
@@ -279,6 +319,12 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         questions={phase.questions}
         onSubmit={handleDialogSubmit}
         onCancel={handleDialogCancel}
+        onCtrlSpace={!activeIsClaryMode ? handleCtrlSpace : undefined}
+        extraParts={
+          !activeIsClaryMode
+            ? ['Ctrl+Space to refine or regenerate']
+            : undefined
+        }
         width={inputWidth - 2}
       />
     </Box>

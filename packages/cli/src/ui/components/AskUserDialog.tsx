@@ -180,6 +180,12 @@ interface AskUserDialogProps {
    */
   onActiveTextInputChange?: (active: boolean) => void;
   /**
+   * Optional callback fired when Ctrl+Space is pressed inside the dialog.
+   * Called with the current freeform text if the user was typing in the custom
+   * option input, or undefined if focused on a predefined option.
+   */
+  onCtrlSpace?: (freeformText?: string) => void;
+  /**
    * Width of the dialog.
    */
   width: number;
@@ -491,6 +497,7 @@ interface ChoiceQuestionViewProps {
   onAnswer: (answer: string) => void;
   onSelectionChange?: (answer: string) => void;
   onEditingCustomOption?: (editing: boolean) => void;
+  onCtrlSpace?: (freeformText?: string) => void;
   availableWidth: number;
   availableHeight?: number;
   initialAnswer?: string;
@@ -503,6 +510,7 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
   onAnswer,
   onSelectionChange,
   onEditingCustomOption,
+  onCtrlSpace,
   availableWidth,
   availableHeight,
   initialAnswer,
@@ -603,6 +611,9 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
 
   const customOptionText = customBuffer.text;
 
+  // Track the currently highlighted item so Ctrl+Space can refine it.
+  const highlightedItemRef = useRef<OptionItem | null>(null);
+
   // Helper to build answer string from selections
   const buildAnswerString = useCallback(
     (
@@ -660,6 +671,21 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
         return true;
       }
 
+      // Ctrl+Space: clarify highlighted suggestion, refine freeform text, or regenerate
+      if (keyMatchers[Command.TOGGLE_VIBE_MODE](key) && onCtrlSpace) {
+        let textToRefine: string | undefined;
+        if (isCustomOptionFocused && customOptionText.trim()) {
+          // Freeform text typed — clarify that
+          textToRefine = customOptionText;
+        } else if (highlightedItemRef.current?.type === 'option') {
+          // Regular suggestion highlighted — use its label as the draft to clarify
+          textToRefine = highlightedItemRef.current.label;
+        }
+        // Otherwise textToRefine is undefined → regenerate A-mode suggestions
+        onCtrlSpace(textToRefine);
+        return true;
+      }
+
       // Don't jump if a navigation or selection key is pressed
       if (
         keyMatchers[Command.DIALOG_NAVIGATION_UP](key) ||
@@ -702,6 +728,7 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
       isCustomOptionFocused,
       customBuffer,
       onEditingCustomOption,
+      onCtrlSpace,
       customOptionText,
       keyMatchers,
     ],
@@ -763,6 +790,7 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
 
   const handleHighlight = useCallback(
     (itemValue: OptionItem) => {
+      highlightedItemRef.current = itemValue;
       const nowFocusingCustomOption = itemValue.type === 'other';
       dispatch({
         type: 'SET_CUSTOM_FOCUSED',
@@ -1006,6 +1034,7 @@ export const AskUserDialog: React.FC<AskUserDialogProps> = ({
   onSubmit,
   onCancel,
   onActiveTextInputChange,
+  onCtrlSpace,
   width,
   availableHeight: availableHeightProp,
   extraParts,
@@ -1254,6 +1283,7 @@ export const AskUserDialog: React.FC<AskUserDialogProps> = ({
         onAnswer={handleAnswer}
         onSelectionChange={handleSelectionChange}
         onEditingCustomOption={handleEditingCustomOption}
+        onCtrlSpace={onCtrlSpace}
         availableWidth={width}
         availableHeight={availableHeight}
         initialAnswer={answers[currentQuestionIndex]}
