@@ -1597,7 +1597,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
           <VibeInput
             onSubmit={(val) => {
               setVibeModeActive(false);
-              onSubmit(val);
+              handleSubmitAndClear(val);
             }}
             onCancel={() => setVibeModeActive(false)}
             inputWidth={inputWidth}

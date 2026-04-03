@@ -300,6 +300,135 @@ exports[`InputPrompt > mouse interaction > should toggle paste expansion on doub
 "
 `;
 
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 10`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ src/ui/components/InputPrompt.tsx:248:36
+
+ 245:   const [vibeModeActive, setVibeModeActive] = useState(false);
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () => makeVibeGenerator(config.getBaseLlmClient()),
+ 249:     [config],
+ 250:   );
+ 251:   const vibeContext = useMemo(
+
+ -  (src/ui/components/InputPrompt.tsx:248:36)
+ -mountMem 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:4272:23)
+ -Object.useMe 
+  o           (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconcil
+              er.development.js:14920:18)
+ -process.env.NODE_ENV.exports 
+  useMemo                     (/Users/harrischan/Github/gemini-cli/node_modules/react/cjs/react.dev
+                              elopment.js:1251:34)
+ - InputPrompt (src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bott 
+  m-frame                (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/rea
+                         ct-reconciler.development.js:15859:20)
+ -renderWithHoo 
+  s            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconci
+               ler.development.js:3221:22)
+ -updateFunctionComp 
+  nent              (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-re
+                    conciler.development.js:6475:19)
+ -beginWor 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:8009:18)
+ -runWithFiberIn 
+  EV            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconc
+                iler.development.js:1738:13)
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 11`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ src/ui/components/InputPrompt.tsx:248:36
+
+ 245:   const [vibeModeActive, setVibeModeActive] = useState(false);
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () => makeVibeGenerator(config.getBaseLlmClient()),
+ 249:     [config],
+ 250:   );
+ 251:   const vibeContext = useMemo(
+
+ -  (src/ui/components/InputPrompt.tsx:248:36)
+ -mountMem 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:4272:23)
+ -Object.useMe 
+  o           (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconcil
+              er.development.js:14920:18)
+ -process.env.NODE_ENV.exports 
+  useMemo                     (/Users/harrischan/Github/gemini-cli/node_modules/react/cjs/react.dev
+                              elopment.js:1251:34)
+ - InputPrompt (src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bott 
+  m-frame                (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/rea
+                         ct-reconciler.development.js:15859:20)
+ -renderWithHoo 
+  s            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconci
+               ler.development.js:3221:22)
+ -updateFunctionComp 
+  nent              (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-re
+                    conciler.development.js:6475:19)
+ -beginWor 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:8009:18)
+ -runWithFiberIn 
+  EV            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconc
+                iler.development.js:1738:13)
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 12`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ src/ui/components/InputPrompt.tsx:248:36
+
+ 245:   const [vibeModeActive, setVibeModeActive] = useState(false);
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () => makeVibeGenerator(config.getBaseLlmClient()),
+ 249:     [config],
+ 250:   );
+ 251:   const vibeContext = useMemo(
+
+ -  (src/ui/components/InputPrompt.tsx:248:36)
+ -mountMem 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:4272:23)
+ -Object.useMe 
+  o           (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconcil
+              er.development.js:14920:18)
+ -process.env.NODE_ENV.exports 
+  useMemo                     (/Users/harrischan/Github/gemini-cli/node_modules/react/cjs/react.dev
+                              elopment.js:1251:34)
+ - InputPrompt (src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bott 
+  m-frame                (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/rea
+                         ct-reconciler.development.js:15859:20)
+ -renderWithHoo 
+  s            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconci
+               ler.development.js:3221:22)
+ -updateFunctionComp 
+  nent              (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-re
+                    conciler.development.js:6475:19)
+ -beginWor 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:8009:18)
+ -runWithFiberIn 
+  EV            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconc
+                iler.development.js:1738:13)
+"
+`;
+
 exports[`InputPrompt > snapshots > should not show inverted cursor when shell is focused 1`] = `
 "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  >   Type your message or @path/to/file                                                             

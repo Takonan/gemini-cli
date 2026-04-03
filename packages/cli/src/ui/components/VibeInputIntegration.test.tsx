@@ -17,11 +17,20 @@ import { StreamingState } from '../types.js';
 import type { TextBuffer } from './shared/text-buffer.js';
 // Mock VibeInput so tests don't need a live LLM.
 vi.mock('./VibeInput.js', () => ({
-  VibeInput: ({ onSubmit }: { onSubmit: (val: string) => void }) => {
-    // Ink's useInput key object uses boolean flags (key.return), not key.name.
-    useInput((_input: string, key: { return?: boolean }) => {
+  VibeInput: ({
+    onSubmit,
+    onCancel,
+  }: {
+    onSubmit: (val: string) => void;
+    onCancel: () => void;
+  }) => {
+    // Ink's useInput key object uses boolean flags (key.return, key.escape), not key.name.
+    useInput((_input: string, key: { return?: boolean; escape?: boolean }) => {
       if (key.return) {
         onSubmit('vibe suggestion');
+      }
+      if (key.escape) {
+        onCancel();
       }
     });
     return (
