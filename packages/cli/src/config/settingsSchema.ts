@@ -580,6 +580,41 @@ const SETTINGS_SCHEMA = {
           'Hide the context summary (GEMINI.md, MCP servers) above the input.',
         showInDialog: true,
       },
+      vibe: {
+        type: 'object',
+        label: 'Vibe Mode',
+        category: 'UI',
+        requiresRestart: false,
+        default: {},
+        description: 'Settings for Vibe Mode.',
+        showInDialog: true,
+        properties: {
+          model: {
+            type: 'enum',
+            label: 'Vibe Model',
+            category: 'UI',
+            requiresRestart: false,
+            default: 'flash',
+            description:
+              'The model to use for Vibe Mode suggestions and clarifications. "flash" is faster, "pro" is higher quality.',
+            showInDialog: true,
+            options: [
+              { value: 'flash', label: 'Flash' },
+              { value: 'pro', label: 'Pro' },
+            ],
+          },
+          maxContextMessages: {
+            type: 'number',
+            label: 'Max Context Messages',
+            category: 'UI',
+            requiresRestart: false,
+            default: 10,
+            description:
+              'Maximum number of recent messages to include in Vibe Mode context.',
+            showInDialog: true,
+          },
+        },
+      },
       footer: {
         type: 'object',
         label: 'Footer',

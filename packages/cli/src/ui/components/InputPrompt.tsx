@@ -245,14 +245,21 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   const [vibeModeActive, setVibeModeActive] = useState(false);
   const [vibeDraft, setVibeDraft] = useState('');
   const vibeGenerator = useMemo(
-    () => makeVibeGenerator(config.getBaseLlmClient()),
-    [config],
+    () =>
+      makeVibeGenerator(config.getBaseLlmClient(), {
+        model: settings.ui?.vibe?.model,
+      }),
+    [config, settings.ui?.vibe?.model],
   );
   const vibeContext = useMemo(
-    () => extractConversationContext(history),
+    () =>
+      extractConversationContext(
+        history,
+        settings.ui?.vibe?.maxContextMessages,
+      ),
     // Snapshot conversation at the moment vibe mode opens, not on every turn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [vibeModeActive],
+    [vibeModeActive, settings.ui?.vibe?.maxContextMessages],
   );
   const workspaceContext = useMemo(
     () => (vibeModeActive ? getWorkspaceContext() : ''),

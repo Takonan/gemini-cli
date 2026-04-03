@@ -10,11 +10,16 @@ import { LlmRole } from '@google/gemini-cli-core';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /**
- * Model config key for vibe suggestion calls.
+ * Default model config key for vibe suggestion calls.
  * Reuses the prompt-completion alias (gemini-2.5-flash-lite, no thinking
  * budget) — fast and cheap.
  */
-const VIBE_MODEL_CONFIG_KEY = { model: 'prompt-completion' };
+const VIBE_MODEL_FLASH = { model: 'prompt-completion' };
+
+/**
+ * High-quality model config key for vibe suggestion calls.
+ */
+const VIBE_MODEL_PRO = { model: 'gemini-2.0-pro' };
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -140,11 +145,16 @@ function buildClarifyingQuestionsPrompt(
     : '';
 
   return (
-    `You help users refine rough prompts for an AI coding assistant.${convLine}${wsLine}\n` +
-    `The user wants to send: "${draft}"\n\n` +
-    `Generate 1–3 clarifying questions (in order of importance) to help make this prompt more specific and actionable. ` +
-    `Each question should have 2–4 concrete options. ` +
-    `Don't ask obvious or generic questions — focus on what would most change the quality of the response.`
+    `You are an expert prompt engineer helping a user refine a rough draft for an AI coding assistant.\n` +
+    `${convLine}${wsLine}\n` +
+    `The user's draft is: "${draft}"\n\n` +
+    `Your goal is to generate 1–3 high-impact clarifying questions that would most improve the quality, specificity, and actionability of the AI's response to this prompt.\n\n` +
+    `Guidelines:\n` +
+    `- Focus on architectural choices, edge cases, scope, or specific technologies that are currently ambiguous.\n` +
+    `- Each question MUST have 2–4 concrete, distinct options for the user to choose from.\n` +
+    `- Avoid generic questions like "Which language?" if it's already clear from the context.\n` +
+    `- Prioritize questions that resolve the most significant "unknowns" in the draft.\n` +
+    `- Keep headers extremely short (1-2 words).`
   );
 }
 
@@ -177,6 +187,10 @@ export interface ClarifyingQuestion {
   question: string;
   header: string;
   options: PromptOption[];
+}
+
+export interface VibeGeneratorOptions {
+  model?: 'flash' | 'pro';
 }
 
 export interface VibeGenerator {
@@ -213,7 +227,13 @@ export interface VibeGenerator {
 
 // ─── Implementation ───────────────────────────────────────────────────────────
 
-export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
+export function makeVibeGenerator(
+  baseLlmClient: BaseLlmClient,
+  options: VibeGeneratorOptions = {},
+): VibeGenerator {
+  const modelConfigKey =
+    options.model === 'pro' ? VIBE_MODEL_PRO : VIBE_MODEL_FLASH;
+
   return {
     generateNextPromptOptions: async (
       convContext,
@@ -225,7 +245,7 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
         workspaceContext,
       );
       const result = await baseLlmClient.generateJson({
-        modelConfigKey: VIBE_MODEL_CONFIG_KEY,
+        modelConfigKey,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         schema: NEXT_PROMPT_OPTIONS_SCHEMA,
         abortSignal,
@@ -249,7 +269,7 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
         workspaceContext,
       );
       const result = await baseLlmClient.generateJson({
-        modelConfigKey: VIBE_MODEL_CONFIG_KEY,
+        modelConfigKey,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         schema: CLARIFYING_QUESTIONS_SCHEMA,
         abortSignal,
@@ -264,7 +284,7 @@ export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
     assembleRefinedPrompt: async (draft, questionAnswerPairs, abortSignal) => {
       const prompt = buildRefinedPromptPrompt(draft, questionAnswerPairs);
       const result = await baseLlmClient.generateJson({
-        modelConfigKey: VIBE_MODEL_CONFIG_KEY,
+        modelConfigKey,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         schema: REFINED_PROMPT_SCHEMA,
         abortSignal,

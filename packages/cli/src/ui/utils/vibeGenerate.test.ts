@@ -4,10 +4,54 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect } from 'vitest';
-import { extractConversationContext } from './vibeGenerate.js';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  extractConversationContext,
+  makeVibeGenerator,
+} from './vibeGenerate.js';
+import type { BaseLlmClient } from '@google/gemini-cli-core';
 
 describe('vibeGenerate', () => {
+  describe('makeVibeGenerator', () => {
+    it('uses prompt-completion model by default', async () => {
+      const mockLlmClient = {
+        generateJson: vi.fn().mockResolvedValue({ options: [] }),
+      } as unknown as BaseLlmClient;
+
+      const generator = makeVibeGenerator(mockLlmClient);
+      await generator.generateNextPromptOptions(
+        '',
+        '',
+        new AbortController().signal,
+      );
+
+      expect(mockLlmClient.generateJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelConfigKey: { model: 'prompt-completion' },
+        }),
+      );
+    });
+
+    it('uses gemini-2.0-pro when model option is set to pro', async () => {
+      const mockLlmClient = {
+        generateJson: vi.fn().mockResolvedValue({ options: [] }),
+      } as unknown as BaseLlmClient;
+
+      const generator = makeVibeGenerator(mockLlmClient, { model: 'pro' });
+      await generator.generateNextPromptOptions(
+        '',
+        '',
+        new AbortController().signal,
+      );
+
+      expect(mockLlmClient.generateJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelConfigKey: { model: 'gemini-2.0-pro' },
+        }),
+      );
+    });
+  });
+
   describe('extractConversationContext', () => {
     it('extracts user and gemini messages', () => {
       const history = [
