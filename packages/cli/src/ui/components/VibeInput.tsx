@@ -4,211 +4,108 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import type React from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text } from 'ink';
-import type { VibeGenerator } from '../utils/vibeGenerate.js';
+import type {
+  VibeGenerator,
+  ClarifyingQuestion,
+} from '../utils/vibeGenerate.js';
 import { useKeypress, type Key } from '../hooks/useKeypress.js';
 import { KeypressPriority } from '../contexts/KeypressContext.js';
-import {
-  FileSearchFactory,
-  FileDiscoveryService,
-  type Config,
-  type FileSearch,
-} from '@google/gemini-cli-core';
+import { AskUserDialog } from './AskUserDialog.js';
+import { QuestionType, type Question } from '@google/gemini-cli-core';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface VibeVariant {
-  label: string;
-  payload: string;
-}
-
-export interface VibeOption {
-  variants: VibeVariant[];
-  _children: VibeOption[] | null;
-  _loading: boolean;
-  _fetchPromise: Promise<unknown> | null;
-  _error: string | null;
-}
-
 export interface VibeInputProps {
-  /** Called with the final composed payload — hands back to GeminiCLI's onSubmit */
+  /** Called with the final composed prompt — hands back to GeminiCLI's onSubmit */
   onSubmit: (value: string) => void;
-  /** Called when user presses Esc at root depth — restores normal input */
+  /** Called when user presses Esc — restores normal input */
   onCancel: () => void;
-  /** Available width, passed through from InputPrompt's inputWidth prop */
+  /** Available width */
   inputWidth: number;
-  /**
-   * Generates suggestion options and refinements.
-   */
+  /** Generator for prompt suggestions and clarifying questions */
   vibeGenerator: VibeGenerator;
-  /**
-   * Last few messages from GeminiCLI's conversation history, collapsed to a
-   * plain string. Used to seed context-relevant root suggestions.
-   */
+  /** Recent conversation context for seeding suggestions */
   conversationContext?: string;
-  /**
-   * Brief summary of workspace state (git status, files) to seed suggestions.
-   */
+  /** Brief workspace state summary */
   workspaceContext?: string;
   /**
-   * Project configuration for file searching and @-mention resolution.
+   * Text the user had already typed when they pressed Ctrl+Space.
+   * Empty or undefined → A mode: suggest next prompts.
+   * Non-empty → B mode: generate clarifying questions to refine the draft.
    */
-  config?: Config;
-  /**
-   * If true, starts Vibe Mode in freeform text entry mode.
-   */
-  initialFreeMode?: boolean;
+  initialDraft?: string;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Phase types ─────────────────────────────────────────────────────────────
+
+type Phase =
+  | { status: 'loading' }
+  | { status: 'asking'; questions: Question[] }
+  | { status: 'assembling' }
+  | { status: 'error'; message: string };
+
+// ─── Spinner ──────────────────────────────────────────────────────────────────
 
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const DEPTH_LABELS = ['intent', 'target', 'action', 'detail'];
-const MAX_PAYLOAD_LINE = 66;
 
-// ─── Components ──────────────────────────────────────────────────────────────
-
-const StyledPrompt: React.FC<{
-  text: string;
-  dimColor?: boolean;
-  activeSentenceIdx?: number;
-  activePlaceholderIdx?: number;
-}> = ({ text, dimColor, activeSentenceIdx, activePlaceholderIdx }) => {
-  if (!text) return null;
-
-  // Split into sentences first to handle highlighting
-  const sentences = getSentences(text);
-  const placeholders = getPlaceholders(text);
-  const activePH =
-    activePlaceholderIdx !== undefined && activePlaceholderIdx !== -1
-      ? placeholders[activePlaceholderIdx]
-      : null;
-
+const Spinner: React.FC<{ label: string }> = ({ label }) => {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPIN.length), 80);
+    return () => clearInterval(id);
+  }, []);
   return (
-    <Text>
-      {sentences.map((s, i) => {
-        const isSelected = i === activeSentenceIdx;
-        if (isSelected) {
-          return (
-            <Text key={i} backgroundColor="magenta" color="white">
-              {s}
-            </Text>
-          );
-        }
-
-        // Tokenize sentence for mentions and placeholders
-        const sStart = text.indexOf(s);
-
-        const parts = s.split(/(@[\w/.-]+|\[[^\]]+\])/g);
-
-        return (
-          <Text key={i} color="white" dimColor={dimColor}>
-            {parts.map((part, pi) => {
-              if (part.startsWith('@')) {
-                return (
-                  <Text key={pi} backgroundColor="cyan" color="black">
-                    {part}
-                  </Text>
-                );
-              }
-              if (part.startsWith('[')) {
-                const isPHActive =
-                  activePH &&
-                  text.indexOf(part, sStart) >= activePH.start &&
-                  text.indexOf(part, sStart) + part.length <= activePH.end;
-
-                return (
-                  <Text
-                    key={pi}
-                    color={isPHActive ? 'black' : 'yellow'}
-                    backgroundColor={isPHActive ? 'yellow' : undefined}
-                    bold
-                  >
-                    {part}
-                  </Text>
-                );
-              }
-              return <Text key={pi}>{part}</Text>;
-            })}
-          </Text>
-        );
-      })}
-    </Text>
+    <Box>
+      <Text color="magenta">{SPIN[frame]} </Text>
+      <Text dimColor>{label}</Text>
+    </Box>
   );
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getVariant(
-  options: VibeOption[],
-  index: number,
-  vi: number,
-): VibeVariant {
-  const opt = options[index];
-  if (!opt) return { label: '', payload: '' };
-  return opt.variants[vi] ?? opt.variants[0] ?? { label: '', payload: '' };
+/**
+ * Convert ClarifyingQuestion[] (from vibeGenerate) into Question[] (for AskUserDialog).
+ */
+function toAskUserQuestions(clarifying: ClarifyingQuestion[]): Question[] {
+  return clarifying.map((q) => ({
+    question: q.question,
+    header: q.header,
+    type: QuestionType.CHOICE,
+    options: q.options.map((opt) => ({
+      label: opt.label,
+      description: opt.description,
+    })),
+    multiSelect: false,
+    placeholder: 'Describe your preference...',
+  }));
 }
 
-function wrapText(text: string, maxWidth: number): string[] {
-  const words = text.split(' ');
-  const lines: string[] = [];
-  let line = '';
-  for (const word of words) {
-    if (line && line.length + 1 + word.length > maxWidth) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = line ? `${line} ${word}` : word;
-    }
-  }
-  if (line) lines.push(line);
-  return lines;
+/**
+ * Convert next-prompt options into a single AskUserDialog question.
+ */
+function toNextPromptQuestion(
+  options: Array<{ label: string; description: string }>,
+): Question[] {
+  return [
+    {
+      question: 'What would you like to do next?',
+      header: 'Next',
+      type: QuestionType.CHOICE,
+      options: options.map((opt) => ({
+        label: opt.label,
+        description: opt.description,
+      })),
+      multiSelect: false,
+      placeholder: 'Describe what you want to do...',
+    },
+  ];
 }
 
-function getSentences(text: string): string[] {
-  if (!text) return [];
-  // Split by sentence markers but ignore common abbreviations
-  const regex =
-    /[^.!?]*?(?:\b(?:Dr|Prof|Mr|Ms|Mrs|Sr|Jr)\.[^.!?]*?)*?[.!?]+(?:\s+|$)|[^.!?]+$/g;
-  return text.match(regex) || [text];
-}
-
-function getPlaceholders(
-  text: string,
-): Array<{ text: string; start: number; end: number }> {
-  if (!text) return [];
-  const regex = /\[[^\]]+\]/g;
-  const matches: Array<{ text: string; start: number; end: number }> = [];
-  let m;
-  while ((m = regex.exec(text)) !== null) {
-    matches.push({ text: m[0], start: m.index, end: m.index + m[0].length });
-  }
-  return matches;
-}
-
-function expandDirection(text: string): string {
-  if (text.startsWith('=')) {
-    return `Rewrite with a ${text.slice(1)} tone`;
-  }
-  if (text.startsWith('+')) {
-    return `Add more detail about ${text.slice(1)}`;
-  }
-  if (text.startsWith('-')) {
-    return `Remove or reduce ${text.slice(1)}`;
-  }
-  return text;
-}
-
-// ─── Component ───────────────────────────────────────────────────────────────
-
-interface PathStep {
-  label: string;
-  payload: string;
-  nodeIndex: number;
-}
-
-type UIStep = 'intent' | 'paragraph' | 'refinement' | 'continuation';
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export const VibeInput: React.FC<VibeInputProps> = ({
   onSubmit,
@@ -217,957 +114,173 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   vibeGenerator,
   conversationContext = '',
   workspaceContext = '',
-  config,
-  initialFreeMode,
+  initialDraft = '',
 }) => {
-  const [uiStep, setUiStep] = useState<UIStep>('intent');
-  const [rootOptions, setRootOptions] = useState<VibeOption[] | null>(null);
-  const [currentOptions, setCurrentOptions] = useState<VibeOption[]>([]);
-  const [path, setPath] = useState<PathStep[]>([]);
-  const [depth, setDepth] = useState(0);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [variantIndices, setVariantIndices] = useState([0, 0, 0, 0]);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [waitingForChildren, setWaitingForChildren] = useState(false);
-  const [spinFrame, setSpinFrame] = useState(0);
-  const [freeMode, setFreeMode] = useState(initialFreeMode ?? false);
-  const [freeText, setFreeText] = useState('');
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const isClaryMode = initialDraft.trim().length > 0;
+  const [phase, setPhase] = useState<Phase>({ status: 'loading' });
 
-  // New states for Draft & Refine
-  const [currentParagraph, setCurrentParagraph] = useState<string | null>(null);
-  const [activeSentenceIdx, setActiveSentenceIdx] = useState(-1);
-  const [activePlaceholderIdx, setActivePlaceholderIdx] = useState(-1);
-  const [refinements, setRefinements] = useState<Array<{ label: string }>>([]);
-  const [continuations, setContinuations] = useState<
-    Array<{ label: string; chunk: string }>
-  >([]);
-  const [refinementLoading, setRefinementLoading] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Store clarifying questions for B mode assembly
+  const clarifyingQuestionsRef = useRef<ClarifyingQuestion[]>([]);
 
-  // Mention autocomplete state
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [fileSuggestions, setFileSuggestions] = useState<string[]>([]);
-  const [activeMentionIdx, setActiveMentionIdx] = useState(0);
-  const fileSearchEngine = useRef<FileSearch | null>(null);
+  // Abort on unmount
+  const abortRef = useRef<AbortController>(new AbortController());
+  useEffect(() => () => {
+      abortRef.current.abort();
+    }, []);
 
-  // Initialize file search engine for mentions
+  // Generate questions on mount
   useEffect(() => {
-    if (!config) return;
-    const projectRoot = config.getWorkspaceContext().getDirectories()[0] ?? '.';
-    const engine = FileSearchFactory.create({
-      projectRoot,
-      ignoreDirs: [],
-      fileDiscoveryService: new FileDiscoveryService(
-        projectRoot,
-        config.getFileFilteringOptions(),
-      ),
-      cache: true,
-      cacheTtl: 60,
-      enableRecursiveFileSearch: true,
-      enableFuzzySearch: true,
-    });
-    void engine.initialize().then(() => {
-      fileSearchEngine.current = engine;
-    });
-  }, [config]);
+    const ac = new AbortController();
+    abortRef.current = ac;
 
-  // Handle mention search
-  useEffect(() => {
-    if (mentionQuery === null || !fileSearchEngine.current) {
-      setFileSuggestions([]);
-      return;
+    async function generate() {
+      if (isClaryMode) {
+        const questions = await vibeGenerator.generateClarifyingQuestions(
+          initialDraft,
+          conversationContext,
+          workspaceContext,
+          ac.signal,
+        );
+        clarifyingQuestionsRef.current = questions;
+        setPhase({
+          status: 'asking',
+          questions: toAskUserQuestions(questions),
+        });
+      } else {
+        const options = await vibeGenerator.generateNextPromptOptions(
+          conversationContext,
+          workspaceContext,
+          ac.signal,
+        );
+        setPhase({
+          status: 'asking',
+          questions: toNextPromptQuestion(options),
+        });
+      }
     }
 
-    const ac = new AbortController();
-    void fileSearchEngine.current
-      .search(mentionQuery || '*', {
-        signal: ac.signal,
-        maxResults: 5,
-      })
-      .then((results) => {
-        setFileSuggestions(results);
-        setActiveMentionIdx(0);
-      });
+    generate().catch((err: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      if ((err as { name?: string }).name === 'AbortError') return;
+      setPhase({ status: 'error', message: 'Failed to generate suggestions.' });
+    });
 
     return () => ac.abort();
-  }, [mentionQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Keep mutable refs for use inside async callbacks
-  const pathRef = useRef(path);
-  pathRef.current = path;
-  const rootOptionsRef = useRef(rootOptions);
-  rootOptionsRef.current = rootOptions;
-
-  // Abort controller for in-flight calls
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  useEffect(
-    () => () => {
-      abortControllerRef.current?.abort();
-    },
-    [],
-  );
-
-  // ── Spinner ──────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!initialLoading && !waitingForChildren && !loading) return;
-    const id = setInterval(
-      () => setSpinFrame((f) => (f + 1) % SPIN.length),
-      80,
-    );
-    return () => clearInterval(id);
-  }, [initialLoading, waitingForChildren, loading]);
-
-  // ── Prefetch ─────────────────────────────────────────────────────────────
-
-  const prefetchChildren = useCallback(
-    (options: VibeOption[], optionIndex: number, currentPath: PathStep[]) => {
-      const opt = options[optionIndex];
-      if (!opt || opt._children || opt._loading || opt._fetchPromise) return;
-
-      opt._loading = true;
-      const pathContext = [
-        ...currentPath.map((p) => ({ label: p.label })),
-        { label: opt.variants[0]?.label ?? '' },
-      ];
-
-      const ac = new AbortController();
-      abortControllerRef.current = ac;
-      opt._fetchPromise = vibeGenerator
-        .generateOptions(
-          pathContext,
-          conversationContext,
-          ac.signal,
-          workspaceContext,
-        )
-        .then((children) => {
-          opt._children = children;
-          opt._loading = false;
-          setCurrentOptions((prev) => [...prev]);
-        })
-        .catch(() => {
-          opt._loading = false;
-          opt._error = 'Failed to load';
-          setCurrentOptions((prev) => [...prev]);
-        });
-    },
-    [vibeGenerator, conversationContext, workspaceContext],
-  );
-
-  // ── Initial load ─────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    const ac = new AbortController();
-    abortControllerRef.current = ac;
-    vibeGenerator
-      .generateOptions([], conversationContext, ac.signal, workspaceContext)
-      .then((opts) => {
-        setRootOptions(opts);
-        setCurrentOptions(opts);
-        setInitialLoading(false);
-        prefetchChildren(opts, 0, []);
-      })
-      .catch((err) => {
-        setInitialLoading(false);
-        setLoadError(err instanceof Error ? err.message : String(err));
-      });
-  }, [vibeGenerator, conversationContext, workspaceContext, prefetchChildren]);
-
-  // ── Generation ───────────────────────────────────────────────────────────
-
-  const handleGenerateParagraph = useCallback(
-    async (comment = '', isContinuation = false) => {
-      const vi = variantIndices[activeIndex] ?? 0;
-      const variant = getVariant(currentOptions, activeIndex, vi);
-      // If we are in freeMode at root, variant might be null but we have comment
-      if (!variant && !comment) return;
-
-      let targetSentence = '';
-      const sentences = getSentences(currentParagraph || '');
-      if (activeSentenceIdx !== -1) {
-        targetSentence = sentences[activeSentenceIdx] || '';
-      }
-
-      setLoading(true);
-      const ac = new AbortController();
-      abortControllerRef.current = ac;
-
-      try {
-        const projectRoot = config?.getWorkspaceContext().getDirectories()[0];
-        const stream = vibeGenerator.generateParagraphStream(
-          conversationContext,
-          variant?.label || '',
-          comment,
-          targetSentence,
-          currentParagraph || '',
-          isContinuation,
-          ac.signal,
-          workspaceContext,
-          projectRoot,
-        );
-
-        for await (const text of stream) {
-          if (targetSentence && currentParagraph) {
-            // Surgical splice
-            const updated = currentParagraph.replace(targetSentence, text);
-            setCurrentParagraph(updated);
-          } else if (isContinuation && currentParagraph) {
-            setCurrentParagraph((prev) => (prev ? `${prev} ${text}` : text));
-          } else {
-            setCurrentParagraph(text);
-          }
-          setUiStep('paragraph');
-        }
-
-        setActiveSentenceIdx(-1);
-        setActivePlaceholderIdx(-1);
-      } catch (err) {
-        if (err instanceof Error && err.name !== 'AbortError') {
-          setLoadError(err.message);
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [
-      activeIndex,
-      currentOptions,
-      variantIndices,
-      activeSentenceIdx,
-      currentParagraph,
-      vibeGenerator,
-      conversationContext,
-      workspaceContext,
-      config,
-    ],
-  );
-
-  const handleFillPlaceholder = useCallback(
-    async (phText: string, roughValue: string) => {
-      if (!currentParagraph) return;
-      setLoading(true);
-      const ac = new AbortController();
-      abortControllerRef.current = ac;
-
-      try {
-        const refined = await vibeGenerator.fillPlaceholder(
-          currentParagraph,
-          phText,
-          roughValue,
-          ac.signal,
-          workspaceContext,
-        );
-        setCurrentParagraph(currentParagraph.replace(phText, refined));
-        setActivePlaceholderIdx(-1);
-        setUiStep('paragraph');
-      } catch (err) {
-        if (err instanceof Error && err.name !== 'AbortError') {
-          setLoadError(err.message);
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [currentParagraph, vibeGenerator, workspaceContext],
-  );
-
-  // ── Suggestions ──────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (uiStep !== 'paragraph' || !currentParagraph || loading) return;
-
-    const ac = new AbortController();
-    abortControllerRef.current = ac;
-
-    if (activeSentenceIdx !== -1) {
-      // Fetch refinements for selected sentence
-      const sentences = getSentences(currentParagraph);
-      const target = sentences[activeSentenceIdx];
-      setRefinementLoading(true);
-      vibeGenerator
-        .generateRefinements(
-          conversationContext,
-          currentParagraph,
-          target,
-          ac.signal,
-          workspaceContext,
-        )
-        .then((res) => {
-          setRefinements(res);
-          setRefinementLoading(false);
-        })
-        .catch(() => setRefinementLoading(false));
-    } else if (activePlaceholderIdx === -1) {
-      // Fetch continuations for end cursor
-      const vi = variantIndices[activeIndex] ?? 0;
-      const variant = getVariant(currentOptions, activeIndex, vi);
-      setRefinementLoading(true);
-      vibeGenerator
-        .generateContinuations(
-          conversationContext,
-          currentParagraph,
-          variant?.label || '',
-          '',
-          ac.signal,
-          workspaceContext,
-        )
-        .then((res) => {
-          setContinuations(res);
-          setRefinementLoading(false);
-        })
-        .catch(() => setRefinementLoading(false));
-    }
-  }, [
-    uiStep,
-    currentParagraph,
-    activeSentenceIdx,
-    activePlaceholderIdx,
-    vibeGenerator,
-    conversationContext,
-    workspaceContext,
-    loading,
-    activeIndex,
-    currentOptions,
-    variantIndices,
-  ]);
-
-  // ── Keyboard ─────────────────────────────────────────────────────────────
-
-  const [activeSuggestionIdx, setActiveSuggestionIdx] = useState(0);
-
-  const handleKeyPress = useCallback(
+  const handleCancel = useCallback(
     (key: Key) => {
-      if (loadError || loading) return false;
-      if (initialLoading && !freeMode) return false;
-
-      // ── Free text mode / Direction mode ──
-      if (freeMode) {
-        // Handle mention autocomplete selection
-        if (mentionQuery !== null) {
-          if (
-            key.name === 'return' ||
-            key.sequence === '\r' ||
-            key.name === 'tab'
-          ) {
-            if (fileSuggestions.length > 0) {
-              const selected = fileSuggestions[activeMentionIdx];
-              // Replace current mention query with the full file path
-              const lastAtIndex = freeText.lastIndexOf('@');
-              const prefix = freeText.slice(0, lastAtIndex);
-              setFreeText(prefix + '@' + selected + ' ');
-              setMentionQuery(null);
-              return true;
-            }
-          } else if (key.name === 'up') {
-            setActiveMentionIdx((prev) =>
-              fileSuggestions.length > 0
-                ? (prev - 1 + fileSuggestions.length) % fileSuggestions.length
-                : 0,
-            );
-            return true;
-          } else if (key.name === 'down') {
-            setActiveMentionIdx((prev) =>
-              fileSuggestions.length > 0
-                ? (prev + 1) % fileSuggestions.length
-                : 0,
-            );
-            return true;
-          } else if (key.name === 'escape') {
-            setMentionQuery(null);
-            return true;
-          } else if (key.name === 'backspace' || key.name === 'delete') {
-            const nextText = freeText.slice(0, -1);
-            setFreeText(nextText);
-            const lastAtIndex = nextText.lastIndexOf('@');
-            if (
-              lastAtIndex === -1 ||
-              nextText.slice(lastAtIndex).includes(' ')
-            ) {
-              setMentionQuery(null);
-            } else {
-              setMentionQuery(nextText.slice(lastAtIndex + 1));
-            }
-            return true;
-          } else if (
-            key.sequence &&
-            !key.ctrl &&
-            !key.cmd &&
-            key.sequence.length === 1
-          ) {
-            const nextText = freeText + key.sequence;
-            setFreeText(nextText);
-            const lastAtIndex = nextText.lastIndexOf('@');
-            setMentionQuery(nextText.slice(lastAtIndex + 1));
-            return true;
-          }
-          return true;
-        }
-
-        const suggestions =
-          activeSentenceIdx !== -1
-            ? refinements
-            : activePlaceholderIdx === -1
-              ? continuations
-              : [];
-        const query = freeText.trim().toLowerCase();
-        const matches = query
-          ? suggestions.filter((s) => s.label.toLowerCase().includes(query))
-          : suggestions;
-
-        if (
-          key.name === 'return' ||
-          key.sequence === '\r' ||
-          key.name === 'tab'
-        ) {
-          const rawComment =
-            matches.length > 0 && activeSuggestionIdx < matches.length
-              ? matches[activeSuggestionIdx].label
-              : freeText.trim();
-
-          setFreeMode(false);
-          setFreeText('');
-          setActiveSuggestionIdx(0);
-
-          if (!rawComment) return true;
-
-          // If we are at root, and we matched a suggestion, update activeIndex
-          if (uiStep === 'intent' && matches.length > 0) {
-            const optIndex = currentOptions.findIndex(
-              (opt) => opt.variants[0]?.label === rawComment,
-            );
-            if (optIndex !== -1) {
-              setActiveIndex(optIndex);
-            }
-          }
-
-          // Placeholder fill: [name]=rough value
-          const phs = getPlaceholders(currentParagraph || '');
-          const ph =
-            activePlaceholderIdx !== -1 ? phs[activePlaceholderIdx] : null;
-          if (ph && rawComment.includes('=')) {
-            const value = rawComment.split('=')[1] || '';
-            void handleFillPlaceholder(ph.text, value);
-            return true;
-          }
-
-          const comment = expandDirection(rawComment);
-          const isActuallyContinuing =
-            uiStep === 'paragraph' &&
-            activeSentenceIdx === -1 &&
-            activePlaceholderIdx === -1;
-
-          // If it was a continuation match, we might want to use the chunk directly
-          const match = matches.find((m) => m.label === rawComment);
-          if (isActuallyContinuing && match && 'chunk' in match) {
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-            const chunk = (match as { chunk: string }).chunk;
-            setCurrentParagraph((prev: string | null) =>
-              prev ? `${prev} ${chunk}` : chunk,
-            );
-          } else {
-            void handleGenerateParagraph(comment, isActuallyContinuing);
-          }
-          return true;
-        } else if (key.name === 'up') {
-          setActiveSuggestionIdx((prev) =>
-            matches.length > 0
-              ? (prev - 1 + matches.length) % matches.length
-              : 0,
-          );
-          return true;
-        } else if (key.name === 'down') {
-          setActiveSuggestionIdx((prev) =>
-            matches.length > 0 ? (prev + 1) % matches.length : 0,
-          );
-          return true;
-        } else if (key.name === 'escape') {
-          setFreeMode(false);
-          setFreeText('');
-          setActiveSuggestionIdx(0);
-          return true;
-        } else if (key.name === 'backspace' || key.name === 'delete') {
-          setFreeText((t) => t.slice(0, -1));
-          setActiveSuggestionIdx(0);
-          return true;
-        } else if (
-          key.sequence &&
-          !key.ctrl &&
-          !key.cmd &&
-          key.sequence.length === 1
-        ) {
-          if (key.sequence === '@') {
-            setMentionQuery('');
-          }
-          setFreeText((t) => t + key.sequence);
-          setActiveSuggestionIdx(0);
-          return true;
-        }
-        return true; // Consume other keys in freeMode
-      }
-
-      if (waitingForChildren) return false;
-
-      // ── Paragraph Mode Navigation ──
-      if (uiStep === 'paragraph') {
-        const sentences = getSentences(currentParagraph || '');
-        const placeholders = getPlaceholders(currentParagraph || '');
-
-        if (key.name === 'left' || key.sequence === 'h') {
-          setActivePlaceholderIdx(-1);
-          setActiveSentenceIdx((prev) =>
-            prev === -1 ? sentences.length - 1 : Math.max(0, prev - 1),
-          );
-          return true;
-        } else if (key.name === 'right' || key.sequence === 'l') {
-          setActivePlaceholderIdx(-1);
-          setActiveSentenceIdx((prev) =>
-            prev >= sentences.length - 1 ? -1 : prev + 1,
-          );
-          return true;
-        } else if (key.sequence === '[') {
-          setActiveSentenceIdx(-1);
-          if (placeholders.length > 0) {
-            setActivePlaceholderIdx((prev) => (prev + 1) % placeholders.length);
-          }
-          return true;
-        } else if (key.sequence === '/') {
-          setFreeMode(true);
-          const ph =
-            activePlaceholderIdx !== -1
-              ? placeholders[activePlaceholderIdx]
-              : null;
-          setFreeText(ph ? `${ph.text}=` : '');
-          return true;
-        } else if (key.name === 'return' || key.sequence === '\r') {
-          if (currentParagraph) onSubmit(currentParagraph);
-          return true;
-        } else if (key.name === 'escape') {
-          if (activeSentenceIdx !== -1 || activePlaceholderIdx !== -1) {
-            setActiveSentenceIdx(-1);
-            setActivePlaceholderIdx(-1);
-          } else {
-            setUiStep('intent');
-            setCurrentParagraph(null);
-          }
-          return true;
-        }
-        return true;
-      }
-
-      // ── Intent Mode (Original Tree) ──
-      // Number jump
-      const num = parseInt(key.sequence, 10);
-      if (!isNaN(num) && num >= 1 && num <= currentOptions.length) {
-        const newIdx = num - 1;
-        setActiveIndex(newIdx);
-        prefetchChildren(currentOptions, newIdx, path);
-        return true;
-      }
-
-      if (key.name === 'up' || key.sequence === 'k') {
-        const newIdx = Math.max(0, activeIndex - 1);
-        setActiveIndex(newIdx);
-        prefetchChildren(currentOptions, newIdx, path);
-        return true;
-      } else if (key.name === 'down' || key.sequence === 'j') {
-        const newIdx = Math.min(currentOptions.length - 1, activeIndex + 1);
-        setActiveIndex(newIdx);
-        prefetchChildren(currentOptions, newIdx, path);
-        return true;
-      } else if (key.name === 'left' || key.sequence === 'h') {
-        const opt = currentOptions[activeIndex];
-        if (opt) {
-          const total = opt.variants.length;
-          setVariantIndices((vi) => {
-            const next = [...vi];
-            next[activeIndex] = ((vi[activeIndex] ?? 0) - 1 + total) % total;
-            return next;
-          });
-        }
-        return true;
-      } else if (key.name === 'right' || key.sequence === 'l') {
-        const opt = currentOptions[activeIndex];
-        if (opt) {
-          const total = opt.variants.length;
-          setVariantIndices((vi) => {
-            const next = [...vi];
-            next[activeIndex] = ((vi[activeIndex] ?? 0) + 1) % total;
-            return next;
-          });
-        }
-        return true;
-      } else if (key.name === 'tab') {
-        // Confirm block → advance depth
-        const vi = variantIndices[activeIndex] ?? 0;
-        const variant = getVariant(currentOptions, activeIndex, vi);
-        const opt = currentOptions[activeIndex];
-        if (!opt) return true;
-
-        const newPath: PathStep[] = [
-          ...path,
-          {
-            label: variant.label,
-            payload: variant.payload,
-            nodeIndex: activeIndex,
-          },
-        ];
-        setPath(newPath);
-        setDepth((d) => d + 1);
-
-        if (opt._children?.length) {
-          setCurrentOptions(opt._children);
-          setActiveIndex(0);
-          setVariantIndices([0, 0, 0, 0]);
-          prefetchChildren(opt._children, 0, newPath);
-        } else {
-          setWaitingForChildren(true);
-          const ac = new AbortController();
-          abortControllerRef.current = ac;
-          void vibeGenerator
-            .generateOptions(
-              newPath.map((p) => ({ label: p.label })),
-              conversationContext,
-              ac.signal,
-              workspaceContext,
-            )
-            .then((children) => {
-              opt._children = children;
-              setWaitingForChildren(false);
-              setCurrentOptions(children);
-              setActiveIndex(0);
-              setVariantIndices([0, 0, 0, 0]);
-              if (children.length) prefetchChildren(children, 0, newPath);
-            })
-            .catch(() => {
-              setWaitingForChildren(false);
-              setPath(pathRef.current.slice(0, -1));
-              setDepth((d) => Math.max(0, d - 1));
-            });
-        }
-        return true;
-      } else if (key.name === 'return' || key.sequence === '\r') {
-        // Intent confirmed -> Generate Draft
-        void handleGenerateParagraph();
-        return true;
-      } else if (key.sequence === '/') {
-        setFreeMode(true);
-        setFreeText('');
-        return true;
-      } else if (key.name === 'escape') {
-        if (path.length > 0) {
-          const newPath = path.slice(0, -1);
-          setPath(newPath);
-          setDepth((d) => Math.max(0, d - 1));
-
-          let opts = rootOptionsRef.current ?? [];
-          for (const step of newPath) {
-            opts = opts[step.nodeIndex]?._children ?? opts;
-          }
-          setCurrentOptions(opts);
-          setActiveIndex(0);
-          setVariantIndices([0, 0, 0, 0]);
-        } else {
-          onCancel();
-        }
+      if (key.name === 'escape') {
+        onCancel();
         return true;
       }
       return false;
     },
-    [
-      initialLoading,
-      loadError,
-      loading,
-      freeMode,
-      activeSentenceIdx,
-      refinements,
-      activePlaceholderIdx,
-      continuations,
-      freeText,
-      activeSuggestionIdx,
-      currentParagraph,
-      uiStep,
-      handleFillPlaceholder,
-      handleGenerateParagraph,
-      waitingForChildren,
-      currentOptions,
-      activeIndex,
-      prefetchChildren,
-      path,
-      variantIndices,
-      vibeGenerator,
-      conversationContext,
-      workspaceContext,
-      onCancel,
-      onSubmit,
-      mentionQuery,
-      fileSuggestions,
-      activeMentionIdx,
-    ],
+    [onCancel],
   );
 
-  useKeypress(handleKeyPress, {
-    isActive: true,
+  useKeypress(handleCancel, {
+    isActive:
+      phase.status === 'loading' ||
+      phase.status === 'assembling' ||
+      phase.status === 'error',
     priority: KeypressPriority.High,
   });
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const handleDialogSubmit = useCallback(
+    async (answers: Record<string, string>) => {
+      if (!isClaryMode) {
+        // A mode: the selected option IS the message
+        const answer = answers[0] ?? '';
+        if (answer.trim()) {
+          onSubmit(answer.trim());
+        } else {
+          onCancel();
+        }
+        return;
+      }
 
-  const maxWidth = Math.min(inputWidth - 4, 76);
+      // B mode: assemble a refined prompt from draft + answers
+      setPhase({ status: 'assembling' });
 
-  if (loadError) {
-    return (
-      <Box>
-        <Text color="yellow">✗ vibetype: </Text>
-        <Text dimColor>{loadError}</Text>
-      </Box>
-    );
-  }
+      const questions = clarifyingQuestionsRef.current;
+      const questionAnswerPairs = questions
+        .map((q, i) => ({
+          question: q.question,
+          answer: answers[i] ?? '',
+        }))
+        .filter((qa) => qa.answer.trim());
 
-  if (freeMode) {
-    const suggestions =
-      uiStep === 'intent'
-        ? currentOptions.map((opt) => ({
-            label: opt.variants[0]?.label ?? '',
-          }))
-        : activeSentenceIdx !== -1
-          ? refinements
-          : activePlaceholderIdx === -1
-            ? continuations
-            : [];
-    const query = freeText.trim().toLowerCase();
-    const matches = query
-      ? suggestions.filter((s) => s.label.toLowerCase().includes(query))
-      : suggestions;
-
-    return (
-      <Box flexDirection="column">
-        <Text dimColor>Direction / Type your prompt:</Text>
-        <Box>
-          <Text color="magenta">❯ </Text>
-          <StyledPrompt text={freeText} />
-          <Text>█</Text>
-        </Box>
-
-        {mentionQuery !== null && fileSuggestions.length > 0 && (
-          <Box
-            flexDirection="column"
-            marginTop={1}
-            borderStyle="round"
-            borderColor="cyan"
-            paddingX={1}
-          >
-            <Text color="cyan" bold>
-              Files (@):
-            </Text>
-            {fileSuggestions.map((file, i) => (
-              <Box key={file}>
-                <Text color={i === activeMentionIdx ? 'cyan' : undefined}>
-                  {i === activeMentionIdx ? '▸' : ' '}
-                </Text>
-                <Text color={i === activeMentionIdx ? 'white' : 'gray'}>
-                  {' '}
-                  @{file}
-                </Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        {mentionQuery === null &&
-          (refinementLoading || (uiStep === 'intent' && initialLoading)) &&
-          matches.length === 0 && (
-            <Box marginTop={1}>
-              <Text color="magenta">{SPIN[spinFrame]} </Text>
-              <Text dimColor>generating...</Text>
-            </Box>
-          )}
-
-        {mentionQuery === null && matches.length > 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text dimColor>Suggestions (Tab to select, ↑/↓ navigate):</Text>
-            {matches.slice(0, 5).map((m, i) => (
-              <Box key={i}>
-                <Text color={i === activeSuggestionIdx ? 'cyan' : undefined}>
-                  {i === activeSuggestionIdx ? '▸' : ' '}
-                </Text>
-                <Text
-                  color={i === activeSuggestionIdx ? 'white' : 'gray'}
-                  bold={i === activeSuggestionIdx}
-                >
-                  {' '}
-                  {m.label}
-                </Text>
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        <Box marginTop={1}>
-          <Text dimColor>Enter confirm Esc back</Text>
-        </Box>
-      </Box>
-    );
-  }
-
-  if (initialLoading) {
-    return (
-      <Box>
-        <Text color="magenta">{SPIN[spinFrame]} </Text>
-        <Text dimColor>generating...</Text>
-      </Box>
-    );
-  }
-
-  if (loading) {
-    return (
-      <Box>
-        <Text color="magenta">{SPIN[spinFrame]} </Text>
-        <Text dimColor>generating...</Text>
-      </Box>
-    );
-  }
-
-  // ── Paragraph Render ──
-  if (uiStep === 'paragraph' && currentParagraph) {
-    return (
-      <Box flexDirection="column" width={maxWidth}>
-        <Box marginBottom={1}>
-          <Text dimColor>Drafting Mode: </Text>
-          <Text color="magenta">
-            {activePlaceholderIdx !== -1
-              ? 'placeholder selected'
-              : activeSentenceIdx === -1
-                ? 'continuing'
-                : 'refining sentence'}
-          </Text>
-        </Box>
-
-        <Box
-          flexDirection="column"
-          borderStyle="single"
-          borderColor="gray"
-          paddingX={1}
-        >
-          <Box>
-            <StyledPrompt
-              text={currentParagraph}
-              activeSentenceIdx={activeSentenceIdx}
-              activePlaceholderIdx={activePlaceholderIdx}
-              dimColor={activeSentenceIdx !== -1}
-            />
-            {activeSentenceIdx === -1 && activePlaceholderIdx === -1 && (
-              <Text color="cyan">▌</Text>
-            )}
-          </Box>
-        </Box>
-
-        <Box marginTop={1}>
-          <Text dimColor>
-            h/l nav sentences [ nav placeholders / refine Enter send Esc back
-          </Text>
-        </Box>
-      </Box>
-    );
-  }
-
-  // ── Intent Render ──
-  const activeVariant = getVariant(
-    currentOptions,
-    activeIndex,
-    variantIndices[activeIndex] ?? 0,
+      try {
+        const refined = await vibeGenerator.assembleRefinedPrompt(
+          initialDraft,
+          questionAnswerPairs,
+          abortRef.current.signal,
+        );
+        onSubmit(refined);
+      } catch (err: unknown) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+        if ((err as { name?: string }).name === 'AbortError') return;
+        // Fallback: submit the draft with answers appended
+        const fallback =
+          initialDraft.trim() +
+          (questionAnswerPairs.length
+            ? '\n\n' +
+              questionAnswerPairs
+                .map((qa) => `${qa.question}: ${qa.answer}`)
+                .join('\n')
+            : '');
+        onSubmit(fallback);
+      }
+    },
+    [isClaryMode, initialDraft, vibeGenerator, onSubmit, onCancel],
   );
 
-  return (
-    <Box flexDirection="column" width={maxWidth}>
-      {/* Breadcrumbs */}
-      {path.length > 0 && (
-        <Box flexWrap="wrap" marginBottom={1}>
-          {path.map((step, i) => (
-            <React.Fragment key={i}>
-              <Text color="magenta">{step.label}</Text>
-              <Text dimColor> → </Text>
-            </React.Fragment>
-          ))}
-        </Box>
-      )}
+  const handleDialogCancel = useCallback(() => {
+    onCancel();
+  }, [onCancel]);
 
-      {/* Depth dots */}
-      <Box marginBottom={1}>
-        {Array.from({ length: depth + 1 }).map((_, i) => (
-          <Text key={i} color={i < depth ? 'magenta' : 'cyan'}>
-            {i < depth ? '● ' : '◉ '}
-          </Text>
-        ))}
-        <Text dimColor>{DEPTH_LABELS[depth] ?? `depth ${depth}`}</Text>
+  if (phase.status === 'loading') {
+    return (
+      <Box paddingLeft={1}>
+        <Spinner
+          label={
+            isClaryMode
+              ? 'generating clarifying questions...'
+              : 'generating suggestions...'
+          }
+        />
       </Box>
+    );
+  }
 
-      {waitingForChildren ? (
-        <Box>
-          <Text color="magenta">{SPIN[spinFrame]} </Text>
-          <Text dimColor>generating...</Text>
-        </Box>
-      ) : (
-        <>
-          {/* Payload preview */}
-          {activeVariant.payload && (
-            <Box flexDirection="column" marginBottom={1}>
-              <Text dimColor>┄┄ will draft →</Text>
-              {wrapText(activeVariant.payload, MAX_PAYLOAD_LINE).map(
-                (line, i) => (
-                  <Text key={i} dimColor>
-                    ┄┄ {line}
-                  </Text>
-                ),
-              )}
-            </Box>
-          )}
+  if (phase.status === 'assembling') {
+    return (
+      <Box paddingLeft={1}>
+        <Spinner label="assembling your prompt..." />
+      </Box>
+    );
+  }
 
-          {/* Option list */}
-          <Box
-            flexDirection="column"
-            borderStyle="single"
-            borderColor="gray"
-            paddingX={1}
-          >
-            {currentOptions.map((opt, i) => {
-              const vi = variantIndices[i] ?? 0;
-              const variant = getVariant(currentOptions, i, vi);
-              const isActive = i === activeIndex;
-              const totalV = opt.variants.length;
+  if (phase.status === 'error') {
+    return (
+      <Box paddingLeft={1}>
+        <Text color="red">{phase.message} </Text>
+        <Text dimColor>Press Esc to dismiss.</Text>
+      </Box>
+    );
+  }
 
-              return (
-                <Box key={i}>
-                  <Text color={isActive ? 'cyan' : undefined}>
-                    {isActive ? '▸' : ' '}
-                  </Text>
-                  <Text color={isActive ? 'cyan' : 'gray'}> {i + 1} </Text>
-                  <Text bold={isActive} color={isActive ? 'white' : 'gray'}>
-                    {variant.label}
-                  </Text>
-                  {totalV > 1 && (
-                    <Text dimColor>
-                      {' '}
-                      ◀▶ {vi + 1}/{totalV}
-                    </Text>
-                  )}
-                  {isActive && opt._loading && (
-                    <Text dimColor> {SPIN[spinFrame]}</Text>
-                  )}
-                </Box>
-              );
-            })}
-          </Box>
-
-          {/* Controls hint */}
-          <Box marginTop={1} flexWrap="wrap">
-            <Text dimColor>
-              j/k nav h/l variants Tab confirm Enter draft / type Esc back
-            </Text>
-          </Box>
-        </>
-      )}
+  // phase.status === 'asking'
+  return (
+    <Box paddingX={1}>
+      <AskUserDialog
+        questions={phase.questions}
+        onSubmit={handleDialogSubmit}
+        onCancel={handleDialogCancel}
+        width={inputWidth - 2}
+      />
     </Box>
   );
 };

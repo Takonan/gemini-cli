@@ -4,605 +4,276 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import type { BaseLlmClient } from '@google/gemini-cli-core';
 import { LlmRole } from '@google/gemini-cli-core';
-import type { VibeOption } from '../components/VibeInput.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const NUM_OPTIONS = 3;
-const NUM_VARIANTS = 3;
-
 /**
- * Model config key for vibetype suggestion calls.
+ * Model config key for vibe suggestion calls.
  * Reuses the prompt-completion alias (gemini-2.5-flash-lite, no thinking
- * budget) — fast and cheap, ideal for background tree generation.
+ * budget) — fast and cheap.
  */
 const VIBE_MODEL_CONFIG_KEY = { model: 'prompt-completion' };
 
-// ─── Schema ───────────────────────────────────────────────────────────────────
+// ─── Schemas ──────────────────────────────────────────────────────────────────
 
-/**
- * JSON schema passed to generateJson() for structured output.
- * Mirrors the shape vibetype.mjs uses with Ollama.
- */
-const VIBE_RESPONSE_SCHEMA: Record<string, unknown> = {
+/** A mode: suggest next prompts based on conversation context. */
+const NEXT_PROMPT_OPTIONS_SCHEMA: Record<string, unknown> = {
   type: 'object',
+  required: ['options'],
   properties: {
     options: {
       type: 'array',
+      minItems: 3,
+      maxItems: 5,
       items: {
         type: 'object',
+        required: ['label', 'description'],
         properties: {
           label: {
             type: 'string',
-            description: 'Short scannable label, 3–6 words',
+            description: 'Short action label, 3–6 words',
           },
-          payload: {
+          description: {
             type: 'string',
-            description: 'Full standalone prompt sentence the user will send',
+            description:
+              'One sentence elaborating on what this prompt would do',
           },
-          variants: {
+        },
+      },
+    },
+  },
+};
+
+/** B mode: clarifying questions to refine a rough draft. */
+const CLARIFYING_QUESTIONS_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  required: ['questions'],
+  properties: {
+    questions: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 3,
+      items: {
+        type: 'object',
+        required: ['question', 'header', 'options'],
+        properties: {
+          question: {
+            type: 'string',
+            description:
+              'A clear, concise clarifying question ending with a question mark',
+          },
+          header: {
+            type: 'string',
+            description:
+              'Very short label for the question (1-3 words), e.g. "Approach", "Scope"',
+          },
+          options: {
             type: 'array',
+            minItems: 2,
+            maxItems: 4,
             items: {
               type: 'object',
+              required: ['label', 'description'],
               properties: {
-                label: { type: 'string' },
-                payload: { type: 'string' },
+                label: {
+                  type: 'string',
+                  description: 'Short option label (1-5 words)',
+                },
+                description: {
+                  type: 'string',
+                  description: 'Brief elaboration on this option',
+                },
               },
-              required: ['label', 'payload'],
             },
-            description: 'Alternate phrasings of the same intent',
           },
         },
-        required: ['label', 'payload', 'variants'],
       },
     },
   },
-  required: ['options'],
 };
 
-const VIBE_REFINEMENT_SCHEMA: Record<string, unknown> = {
+/** B mode: assemble a refined prompt from a draft + answers. */
+const REFINED_PROMPT_SCHEMA: Record<string, unknown> = {
   type: 'object',
+  required: ['prompt'],
   properties: {
-    refinements: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          label: { type: 'string' },
-        },
-        required: ['label'],
-      },
+    prompt: {
+      type: 'string',
+      description: 'The refined, complete prompt incorporating all the answers',
     },
   },
-  required: ['refinements'],
-};
-
-const VIBE_CONTINUATION_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    continuations: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          label: { type: 'string' },
-          chunk: { type: 'string' },
-        },
-        required: ['label', 'chunk'],
-      },
-    },
-  },
-  required: ['continuations'],
-};
-
-const VIBE_TEXT_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    text: { type: 'string' },
-  },
-  required: ['text'],
-};
-
-const VIBE_CHUNK_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    chunk: { type: 'string' },
-  },
-  required: ['chunk'],
 };
 
 // ─── Prompt builders ──────────────────────────────────────────────────────────
 
-function buildOptionsPrompt(
-  pathContext: Array<{ label: string }>,
+function buildNextPromptOptionsPrompt(
   convContext: string,
-  workspaceContext?: string,
+  workspaceContext: string,
 ): string {
-  const isRoot = pathContext.length === 0;
-  const pathLine = isRoot
-    ? ''
-    : `\nConversation path so far: ${pathContext.map((p) => p.label).join(' → ')}`;
   const convLine = convContext
-    ? `\nConversation context:\n${convContext}\n`
-    : '';
-  const wsLine =
-    isRoot && workspaceContext
-      ? `\nWorkspace context (git status/files):\n${workspaceContext}\n`
-      : '';
-
-  return (
-    `You help users compose detailed prompts for AI coding assistants via a ` +
-    `menu interface.${convLine}${wsLine}${pathLine}\n\n` +
-    `Generate exactly ${NUM_OPTIONS} distinct ` +
-    `${isRoot ? 'top-level intent' : 'follow-up refinement'} options` +
-    `${(convContext || workspaceContext) && isRoot ? ' relevant to the conversation and workspace context above' : ''}. ` +
-    `Each option has a primary version plus ${NUM_VARIANTS - 1} alternate phrasings (variants). ` +
-    `Payloads should be complete, standalone prompt sentences the user will send to an AI.`
-  );
-}
-
-function summarizeFile(fileName: string, content: string): string {
-  const lines = content.split('\n');
-  if (lines.length <= 100) return content;
-
-  const imports = lines
-    .filter((l) => l.startsWith('import '))
-    .slice(0, 10)
-    .join('\n');
-  const exports = lines
-    .filter((l) => l.includes('export '))
-    .slice(0, 10)
-    .join('\n');
-  const head = lines.slice(0, 20).join('\n');
-  const tail = lines.slice(-20).join('\n');
-
-  return `[File: ${fileName} (Truncated)]\n${imports}\n\n${exports}\n\n${head}\n...\n${tail}`;
-}
-
-function buildRefinementsPrompt(
-  convContext: string,
-  paragraph: string,
-  targetSentence?: string,
-  workspaceContext?: string,
-): string {
-  const contextLine = convContext
-    ? `Conversation context: ${convContext}\n`
+    ? `\nRecent conversation:\n${convContext}\n`
     : '';
   const wsLine = workspaceContext
-    ? `Workspace context: ${workspaceContext}\n`
-    : '';
-  const targetLine = targetSentence
-    ? `Target Sentence to improve: "${targetSentence.trim()}"\n`
+    ? `\nWorkspace context:\n${workspaceContext}\n`
     : '';
 
   return (
-    `AI prompt editor.${contextLine}${wsLine}\nDraft: "${paragraph}"\n${targetLine}\n` +
-    `Generate 6 short, specific editorial directions to improve this prompt. ` +
-    `Make each direction concrete and different (tone, content, structure, specificity, etc.). ` +
-    `Examples: "Add a specific file path", "Make it more concise", "Lead with a clear goal", "Mention a specific library", "More conversational tone".`
+    `You help users compose prompts for an AI coding assistant.${convLine}${wsLine}\n` +
+    `Generate 3–5 distinct, actionable follow-up prompts the user might want to send next. ` +
+    `Make them specific and relevant to the conversation above. ` +
+    `Each option should be something the user can send as-is or with minor edits.`
   );
 }
 
-function buildContinuationsPrompt(
-  convContext: string,
+function buildClarifyingQuestionsPrompt(
   draft: string,
-  intentLabel: string,
-  comment?: string,
-  workspaceContext?: string,
-): string {
-  const contextLine = convContext
-    ? `Conversation context: ${convContext}\n`
-    : '';
-  const wsLine = workspaceContext
-    ? `Workspace context: ${workspaceContext}\n`
-    : '';
-  const directionLine = comment ? `Direction: ${comment}\n` : '';
-
-  return (
-    `AI prompt drafting.${contextLine}${wsLine}\nCurrent draft: "${draft}"\n` +
-    `Angle: ${intentLabel}\n${directionLine}\n` +
-    `Generate 5 distinct options for the NEXT 1-2 sentences of this AI prompt. ` +
-    `Each with a specific short label and actual prose.`
-  );
-}
-
-function buildParagraphPrompt(
   convContext: string,
-  intentLabel: string,
-  comment?: string,
-  targetSentence?: string,
-  fullContext?: string,
-  isContinuation?: boolean,
-  workspaceContext?: string,
+  workspaceContext: string,
 ): string {
-  const contextLine = convContext
-    ? `Conversation context: ${convContext}\n`
+  const convLine = convContext
+    ? `\nRecent conversation:\n${convContext}\n`
     : '';
   const wsLine = workspaceContext
-    ? `Workspace context: ${workspaceContext}\n`
-    : '';
-
-  if (targetSentence && fullContext) {
-    return (
-      `AI prompt drafting.${contextLine}${wsLine}\n` +
-      `Rewrite this single sentence from an AI coding assistant prompt.\n` +
-      `Original sentence: "${targetSentence.trim()}"\nDirection: "${comment}"\n\n` +
-      `Output ONLY the rewritten sentence. No preamble, no explanation, nothing else.`
-    );
-  }
-
-  if (fullContext && comment && !isContinuation) {
-    return (
-      `AI prompt drafting.${contextLine}${wsLine}\nCurrent draft: "${fullContext}"\n` +
-      `Direction: "${comment}"\n\n` +
-      `TASK: Rewrite the draft incorporating the direction. Output ONLY the final prose. ` +
-      `No preamble, no explanation, no quotes around it. ` +
-      `If specific details are missing, use [bracketed placeholders] like [file path] or [error message] rather than inventing them.`
-    );
-  }
-
-  if (isContinuation) {
-    return (
-      `AI prompt drafting.${contextLine}${wsLine}\nCurrent draft: "${fullContext}"\n` +
-      `Angle: ${intentLabel}\n${comment ? `Direction: ${comment}` : ''}\n\n` +
-      `TASK: Write the next 1-2 sentences continuing the draft. Output ONLY the new sentences. No preamble, no explanation. ` +
-      `Use [bracketed placeholders] like [variable name] if specific details are needed.`
-    );
-  }
-
-  return (
-    `AI prompt drafting.${contextLine}${wsLine}\nAngle: ${intentLabel}\n` +
-    `${comment ? `Direction: ${comment}` : ''}\n\n` +
-    `TASK: Write 1-2 opening sentences for this AI prompt. Output ONLY the prose. No preamble, no explanation. ` +
-    `Use [bracketed placeholders] like [project description] or [framework] if specific details are needed.`
-  );
-}
-
-function buildPlaceholderPrompt(
-  paragraph: string,
-  phText: string,
-  roughValue: string,
-  workspaceContext?: string,
-): string {
-  const idx = paragraph.indexOf(phText);
-  const windowStart = Math.max(0, idx - 120);
-  const windowEnd = Math.min(paragraph.length, idx + phText.length + 120);
-  const context = paragraph.slice(windowStart, windowEnd);
-  const wsLine = workspaceContext
-    ? `Workspace context: ${workspaceContext}\n`
+    ? `\nWorkspace context:\n${workspaceContext}\n`
     : '';
 
   return (
-    `AI prompt editing.\n${wsLine}Context: "...${context}..."\nPlaceholder: ${phText}\n` +
-    `Rough value to express: "${roughValue}"\n\n` +
-    `TASK: Output ONLY the replacement text — a word, phrase, or short clause that fits naturally where ${phText} appears. ` +
-    `Polish the rough value into proper prompt language. No preamble, no full sentences unless the placeholder spans one.`
+    `You help users refine rough prompts for an AI coding assistant.${convLine}${wsLine}\n` +
+    `The user wants to send: "${draft}"\n\n` +
+    `Generate 1–3 clarifying questions (in order of importance) to help make this prompt more specific and actionable. ` +
+    `Each question should have 2–4 concrete options. ` +
+    `Don't ask obvious or generic questions — focus on what would most change the quality of the response.`
   );
 }
 
-// ─── Main export ─────────────────────────────────────────────────────────────
+function buildRefinedPromptPrompt(
+  draft: string,
+  questionAnswerPairs: Array<{ question: string; answer: string }>,
+): string {
+  const pairs = questionAnswerPairs
+    .map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`)
+    .join('\n');
+
+  return (
+    `Rewrite this rough prompt into a clear, specific, actionable AI coding assistant prompt.\n\n` +
+    `Original draft: "${draft}"\n\n` +
+    `Clarifications:\n${pairs}\n\n` +
+    `Output ONLY the final prompt text. No preamble, no quotes, no explanation. ` +
+    `Incorporate all the clarifications naturally. ` +
+    `Use [bracketed placeholders] only if specific details are genuinely unknown.`
+  );
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface PromptOption {
+  label: string;
+  description: string;
+}
+
+export interface ClarifyingQuestion {
+  question: string;
+  header: string;
+  options: PromptOption[];
+}
 
 export interface VibeGenerator {
-  generateOptions: (
-    pathContext: Array<{ label: string }>,
+  /**
+   * A mode: generate suggested next prompts based on conversation context.
+   * Used when the user presses Ctrl+Space with an empty input.
+   */
+  generateNextPromptOptions: (
     convContext: string,
+    workspaceContext: string,
     abortSignal: AbortSignal,
-    workspaceContext?: string,
-  ) => Promise<VibeOption[]>;
-  generateRefinements: (
-    convContext: string,
-    paragraph: string,
-    targetSentence?: string,
-    abortSignal?: AbortSignal,
-    workspaceContext?: string,
-  ) => Promise<Array<{ label: string }>>;
-  generateContinuations: (
-    convContext: string,
+  ) => Promise<PromptOption[]>;
+
+  /**
+   * B mode: generate clarifying questions to refine a rough draft.
+   * Used when the user presses Ctrl+Space with text already in the input.
+   */
+  generateClarifyingQuestions: (
     draft: string,
-    intentLabel: string,
-    comment?: string,
-    abortSignal?: AbortSignal,
-    workspaceContext?: string,
-  ) => Promise<Array<{ label: string; chunk: string }>>;
-  generateParagraph: (
     convContext: string,
-    intentLabel: string,
-    comment?: string,
-    targetSentence?: string,
-    fullContext?: string,
-    isContinuation?: boolean,
-    abortSignal?: AbortSignal,
-    workspaceContext?: string,
-    projectRoot?: string,
-  ) => Promise<string>;
-  generateParagraphStream: (
-    convContext: string,
-    intentLabel: string,
-    comment?: string,
-    targetSentence?: string,
-    fullContext?: string,
-    isContinuation?: boolean,
-    abortSignal?: AbortSignal,
-    workspaceContext?: string,
-    projectRoot?: string,
-  ) => AsyncGenerator<string>;
-  fillPlaceholder: (
-    paragraph: string,
-    phText: string,
-    roughValue: string,
-    abortSignal?: AbortSignal,
-    workspaceContext?: string,
+    workspaceContext: string,
+    abortSignal: AbortSignal,
+  ) => Promise<ClarifyingQuestion[]>;
+
+  /**
+   * B mode: assemble a refined prompt from the draft + question answers.
+   */
+  assembleRefinedPrompt: (
+    draft: string,
+    questionAnswerPairs: Array<{ question: string; answer: string }>,
+    abortSignal: AbortSignal,
   ) => Promise<string>;
 }
 
-/**
- * Returns a VibeGenerator object bound to GeminiCLI's BaseLlmClient.
- */
+// ─── Implementation ───────────────────────────────────────────────────────────
+
 export function makeVibeGenerator(baseLlmClient: BaseLlmClient): VibeGenerator {
   return {
-    generateOptions: async (
-      pathContext,
+    generateNextPromptOptions: async (
       convContext,
-      abortSignal,
       workspaceContext,
+      abortSignal,
     ) => {
-      const prompt = buildOptionsPrompt(
-        pathContext,
+      const prompt = buildNextPromptOptionsPrompt(
         convContext,
         workspaceContext,
       );
       const result = await baseLlmClient.generateJson({
         modelConfigKey: VIBE_MODEL_CONFIG_KEY,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        schema: VIBE_RESPONSE_SCHEMA,
-        abortSignal: abortSignal ?? new AbortController().signal,
-        promptId: 'vibe-options',
+        schema: NEXT_PROMPT_OPTIONS_SCHEMA,
+        abortSignal,
+        promptId: 'vibe-next-options',
         role: LlmRole.UTILITY_TOOL,
       });
-
-      // generateJson returns Record<string, unknown>; schema enforcement is on
-      // the Gemini side so we assert the expected shape here.
       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-      const parsed = result as {
-        options: Array<{
-          label: string;
-          payload: string;
-          variants: Array<{ label: string; payload: string }>;
-        }>;
-      };
-
-      return parsed.options.slice(0, NUM_OPTIONS).map((opt) => ({
-        variants: [
-          { label: opt.label, payload: opt.payload },
-          ...opt.variants.slice(0, NUM_VARIANTS - 1),
-        ],
-        _children: null,
-        _loading: false,
-        _fetchPromise: null,
-        _error: null,
-      }));
+      const parsed = result as { options: PromptOption[] };
+      return parsed.options.slice(0, 5);
     },
 
-    generateRefinements: async (
-      convContext,
-      paragraph,
-      targetSentence,
-      abortSignal,
-      workspaceContext,
-    ) => {
-      const prompt = buildRefinementsPrompt(
-        convContext,
-        paragraph,
-        targetSentence,
-        workspaceContext,
-      );
-      const result = await baseLlmClient.generateJson({
-        modelConfigKey: VIBE_MODEL_CONFIG_KEY,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        schema: VIBE_REFINEMENT_SCHEMA,
-        abortSignal: abortSignal ?? new AbortController().signal,
-        promptId: 'vibe-refinements',
-        role: LlmRole.UTILITY_TOOL,
-      });
-
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-      const parsed = result as { refinements: Array<{ label: string }> };
-      return parsed.refinements.slice(0, 6);
-    },
-
-    generateContinuations: async (
-      convContext,
+    generateClarifyingQuestions: async (
       draft,
-      intentLabel,
-      comment,
-      abortSignal,
+      convContext,
       workspaceContext,
+      abortSignal,
     ) => {
-      const prompt = buildContinuationsPrompt(
-        convContext,
+      const prompt = buildClarifyingQuestionsPrompt(
         draft,
-        intentLabel,
-        comment,
+        convContext,
         workspaceContext,
       );
       const result = await baseLlmClient.generateJson({
         modelConfigKey: VIBE_MODEL_CONFIG_KEY,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        schema: VIBE_CONTINUATION_SCHEMA,
-        abortSignal: abortSignal ?? new AbortController().signal,
-        promptId: 'vibe-continuations',
+        schema: CLARIFYING_QUESTIONS_SCHEMA,
+        abortSignal,
+        promptId: 'vibe-clarifying-questions',
         role: LlmRole.UTILITY_TOOL,
       });
-
       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-      const parsed = result as {
-        continuations: Array<{ label: string; chunk: string }>;
-      };
-      return parsed.continuations.slice(0, 5);
+      const parsed = result as { questions: ClarifyingQuestion[] };
+      return parsed.questions.slice(0, 3);
     },
 
-    generateParagraph: async (
-      convContext,
-      intentLabel,
-      comment,
-      targetSentence,
-      fullContext,
-      isContinuation,
-      abortSignal,
-      workspaceContext,
-      projectRoot,
-    ) => {
-      // Resolve @-mentions in the comment or intent label
-      let resolvedWsContext = workspaceContext || '';
-      const mentionRegex = /@([\w/.-]+)/g;
-      const mentions = new Set<string>();
-      let m;
-      if (comment) {
-        while ((m = mentionRegex.exec(comment)) !== null) mentions.add(m[1]);
-      }
-      if (intentLabel) {
-        while ((m = mentionRegex.exec(intentLabel)) !== null)
-          mentions.add(m[1]);
-      }
-
-      if (mentions.size > 0 && projectRoot) {
-        resolvedWsContext += '\n\nReferenced Files:\n';
-        for (const mention of mentions) {
-          const filePath = path.resolve(projectRoot, mention);
-          try {
-            if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-              const content = fs.readFileSync(filePath, 'utf8');
-              const summary = summarizeFile(mention, content);
-              resolvedWsContext += `--- ${mention} ---\n${summary}\n`;
-            }
-          } catch {
-            // Skip unreadable files
-          }
-        }
-      }
-
-      const prompt = buildParagraphPrompt(
-        convContext,
-        intentLabel,
-        comment,
-        targetSentence,
-        fullContext,
-        isContinuation,
-        resolvedWsContext,
-      );
-      const schema = isContinuation ? VIBE_CHUNK_SCHEMA : VIBE_TEXT_SCHEMA;
-
+    assembleRefinedPrompt: async (draft, questionAnswerPairs, abortSignal) => {
+      const prompt = buildRefinedPromptPrompt(draft, questionAnswerPairs);
       const result = await baseLlmClient.generateJson({
         modelConfigKey: VIBE_MODEL_CONFIG_KEY,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        schema,
-        abortSignal: abortSignal ?? new AbortController().signal,
-        promptId: 'vibe-paragraph',
+        schema: REFINED_PROMPT_SCHEMA,
+        abortSignal,
+        promptId: 'vibe-assemble-prompt',
         role: LlmRole.UTILITY_TOOL,
       });
-
-      const parsed = result as { text?: string; chunk?: string };
-      return (parsed.text ?? parsed.chunk ?? '').trim();
-    },
-
-    async *generateParagraphStream (
-      convContext,
-      intentLabel,
-      comment,
-      targetSentence,
-      fullContext,
-      isContinuation,
-      abortSignal,
-      workspaceContext,
-      projectRoot,
-    ) {
-      // Resolve @-mentions in the comment or intent label
-      let resolvedWsContext = workspaceContext || '';
-      const mentionRegex = /@([\w/.-]+)/g;
-      const mentions = new Set<string>();
-      let m;
-      if (comment) {
-        while ((m = mentionRegex.exec(comment)) !== null) mentions.add(m[1]);
-      }
-      if (intentLabel) {
-        while ((m = mentionRegex.exec(intentLabel)) !== null)
-          mentions.add(m[1]);
-      }
-
-      if (mentions.size > 0 && projectRoot) {
-        resolvedWsContext += '\n\nReferenced Files:\n';
-        for (const mention of mentions) {
-          const filePath = path.resolve(projectRoot, mention);
-          try {
-            if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-              const content = fs.readFileSync(filePath, 'utf8');
-              const summary = summarizeFile(mention, content);
-              resolvedWsContext += `--- ${mention} ---\n${summary}\n`;
-            }
-          } catch {
-            // Skip unreadable files
-          }
-        }
-      }
-
-      const prompt = buildParagraphPrompt(
-        convContext,
-        intentLabel,
-        comment,
-        targetSentence,
-        fullContext,
-        isContinuation,
-        resolvedWsContext,
-      );
-
-      const stream = baseLlmClient.generateContentStream({
-        modelConfigKey: VIBE_MODEL_CONFIG_KEY,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        abortSignal: abortSignal ?? new AbortController().signal,
-        promptId: 'vibe-paragraph-stream',
-        role: LlmRole.UTILITY_TOOL,
-      });
-
-      let accumulated = '';
-      for await (const chunk of stream) {
-        const text =
-          chunk.candidates?.[0]?.content?.parts?.[0]?.text ||
-          chunk.candidates?.[0]?.content?.parts?.[0]?.thought ||
-          '';
-        accumulated += text;
-        yield accumulated;
-      }
-    },
-
-    fillPlaceholder: async (
-      paragraph,
-      phText,
-      roughValue,
-      abortSignal,
-      workspaceContext,
-    ) => {
-      const prompt = buildPlaceholderPrompt(
-        paragraph,
-        phText,
-        roughValue,
-        workspaceContext,
-      );
-      const result = await baseLlmClient.generateJson({
-        modelConfigKey: VIBE_MODEL_CONFIG_KEY,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        schema: VIBE_TEXT_SCHEMA,
-        abortSignal: abortSignal ?? new AbortController().signal,
-        promptId: 'vibe-fill-placeholder',
-        role: LlmRole.UTILITY_TOOL,
-      });
-
       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-      const parsed = result as { text: string };
-      return parsed.text.trim();
+      const parsed = result as { prompt: string };
+      return parsed.prompt.trim();
     },
   };
 }
@@ -636,8 +307,6 @@ export function extractConversationContext(
       const isLastAssistantMessage =
         role === 'assistant' && index === recent.length - 1;
 
-      // Skip truncation for the very last assistant message so we don't
-      // cut off questions or options at the end.
       const text = isLastAssistantMessage
         ? (item.text ?? '')
         : (item.text ?? '').slice(0, maxCharsPerMessage);

@@ -243,6 +243,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
     shortcutsHelpVisible,
   } = useUIState();
   const [vibeModeActive, setVibeModeActive] = useState(false);
+  const [vibeDraft, setVibeDraft] = useState('');
   const vibeGenerator = useMemo(
     () => makeVibeGenerator(config.getBaseLlmClient()),
     [config],
@@ -878,6 +879,10 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
 
       if (keyMatchers[Command.TOGGLE_VIBE_MODE](key) && !shellModeActive) {
         if (streamingState === StreamingState.Idle) {
+          if (!vibeModeActive) {
+            // Capture draft text so VibeInput knows whether to use A or B mode
+            setVibeDraft(buffer.text);
+          }
           setVibeModeActive((v) => !v);
         }
         // Always consume Ctrl+Space so the raw sequence never falls through
@@ -1593,8 +1598,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             vibeGenerator={vibeGenerator}
             conversationContext={vibeContext}
             workspaceContext={workspaceContext}
-            config={config}
-            initialFreeMode={true}
+            initialDraft={vibeDraft}
           />
         </Box>
       </HalfLinePaddedBox>
