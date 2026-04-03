@@ -143,6 +143,33 @@ Integrate Gemini CLI directly into your GitHub workflows with
 - **Custom Workflows**: Build automated, scheduled and on-demand workflows
   tailored to your team's needs
 
+## ✨ Vibe Mode (Interactive Drafting)
+
+Vibe Mode is an interactive prompt drafting component that helps you compose
+high-quality, context-aware prompts through a guided, menu-driven interface. It
+eliminates the "blank page" problem by suggesting next steps or refining your
+rough drafts into precise instructions.
+
+- **Mode A: Next Prompt Suggestions**: If your input is empty, Gemini CLI
+  analyzes your context to suggest logical next steps.
+- **Mode B: Draft Refinement**: If you have a rough draft, Gemini CLI generates
+  targeted clarifying questions to help you specify missing details.
+- **Context Aware**: Suggestions are seeded with your conversation history and
+  current workspace state.
+
+### [Specific Use Case 1]: Refining Vague Drafts
+
+Vibe Mode excels at turning a simple idea into a professional, actionable
+prompt. Instead of manual editing, you answer a few focused questions.
+
+1. Type a rough draft: `refactor the auth logic`.
+2. Press `Ctrl + Space`.
+3. Gemini CLI asks targeted questions (e.g., "Which specific files?",
+   "Prioritize performance or readability?").
+4. Gemini CLI assembles these into a refined, high-quality prompt.
+
+Learn more in the [Vibe Mode documentation](./docs/cli/vibe-mode.md).
+
 ## 🔐 Authentication Options
 
 Choose the authentication method that best fits your needs:

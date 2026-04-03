@@ -2,24 +2,39 @@
 
 Vibe Mode is an interactive prompt drafting component that helps you compose
 high-quality, context-aware prompts for Gemini through a guided, menu-driven
-interface.
+interface. It eliminates the "blank page" problem by suggesting next steps or
+refining your rough drafts into precise instructions.
 
 ## Overview
 
 Vibe Mode transforms the standard linear input into a rich, exploratory drafting
-experience. Instead of typing a full prompt from scratch, you can:
+experience. Depending on whether you have already started typing, it operates in
+one of two modes:
 
-- **Select Intents:** Choose from high-level goals (e.g., "Refactor", "Debug",
-  "Implement").
-- **Explore Variants:** Toggle between different phrasings of the same intent.
-- **Iterative Drafting:** Generate an initial draft and then refine it
-  sentence-by-sentence.
-- **Context Awareness:** Suggestions are automatically seeded with your
-  conversation history and current workspace state.
+- **Mode A: Next Prompt Suggestions:** If your input is empty, Gemini CLI
+  analyzes your conversation history and workspace state to suggest logical next
+  steps (e.g., "Summarize recent changes," "Fix lint errors in the current
+  file").
+- **Mode B: Draft Refinement:** If you have a rough draft, Gemini CLI generates
+  targeted clarifying questions to help you specify missing details, such as
+  preferred implementation patterns or specific files to target.
 
 ## Key Features
 
-### 1. @-Mention Autocomplete
+### 1. Context Awareness
+
+Suggestions and clarifying questions are automatically seeded with:
+
+- **Conversation History:** Recent messages and tool outputs.
+- **Workspace State:** Git status, changed files, and project structure.
+
+### 2. Draft Refinement via Clarifying Questions
+
+Instead of manually editing a long prompt, you answer a few focused questions.
+Gemini CLI then assembles these answers into a polished, professional prompt
+that the model can execute more effectively.
+
+### 3. @-Mention Autocomplete
 
 Directly link your prompt to specific files or symbols in your project.
 
@@ -29,45 +44,44 @@ Directly link your prompt to specific files or symbols in your project.
 - **Context Injection:** When you mention a file, Vibe Mode automatically
   includes a summarized version of that file's content in the prompt context.
 
-### 2. Smart Snippetization
-
-To keep LLM calls fast and efficient, Vibe Mode uses "Smart Snippetization" for
-mentioned files:
-
-- Small files are sent in full.
-- Large files are summarized by including:
-  - Important imports and exports.
-  - The first 20 lines (header/setup).
-  - The last 20 lines (footer/conclusion).
-- This ensures the model gets the "signal" of the file without exceeding token
-  limits.
-
-### 3. Styled Prompt UI
-
-The drafting area features a rich UI that distinguishes different types of
-content:
-
-- **Mentions:** Highlighted in **Cyan** (e.g., `@VibeInput.tsx`).
-- **Placeholders:** Highlighted in **Yellow** (e.g., `[file path]`).
-- **Active Selection:** The current sentence or placeholder being refined is
-  highlighted in **Magenta**.
-
 ## Keyboard Shortcuts
 
-| Shortcut                        | Action                                          |
-| :------------------------------ | :---------------------------------------------- |
-| `Ctrl + Space`                  | Toggle Vibe Mode                                |
-| `j` / `k` (or `Up` / `Down`)    | Navigate options or variants                    |
-| `h` / `l` (or `Left` / `Right`) | Toggle between variants or navigate sentences   |
-| `Tab`                           | Confirm selection and advance to the next depth |
-| `Enter`                         | Generate draft or submit the final prompt       |
-| `/`                             | Enter free-text / direction mode                |
-| `@`                             | Trigger file autocomplete (in free-text mode)   |
-| `[`                             | Cycle through placeholders in the draft         |
-| `Esc`                           | Go back one level or exit Vibe Mode             |
+<!-- prettier-ignore -->
+> [!NOTE]
+> Vibe Mode uses `High` priority keypress handling. While active, standard input
+> is suspended until you submit or cancel.
 
-## How it Works
+| Shortcut       | Action                                                        |
+| :------------- | :------------------------------------------------------------ |
+| `Ctrl + Space` | Toggle Vibe Mode / Regenerate suggestions / Refine typed text |
+| `j` / `k`      | Navigate through suggestions or options                       |
+| `Tab`          | Select an option and advance to the next question             |
+| `Enter`        | Submit the final composed prompt                              |
+| `Esc`          | Cancel and return to normal input                             |
 
-Vibe Mode uses a fast, stateless LLM (`gemini-2.5-flash-lite`) to generate
-suggestions in the background. This ensures the interface remains responsive
-while providing high-quality, contextually relevant options.
+## Common Workflows
+
+### Refining a Vague Instruction
+
+If you have a general idea but aren't sure about the specifics, Vibe Mode can
+help bridge the gap.
+
+1. Type a rough draft: `refactor the auth logic`.
+2. Press `Ctrl + Space`.
+3. Gemini CLI identifies that "auth logic" is broad and asks:
+   - "Which specific files should be refactored?"
+   - "Should we prioritize performance or readability?"
+4. After you select your preferences, it generates a refined prompt like:
+   `Refactor the authentication logic in @src/auth/service.ts to improve readability and simplify the token validation flow.`
+
+### Exploring Next Steps
+
+When you finish a task and aren't sure what to do next, let Vibe Mode suggest
+logical continuations.
+
+1. Ensure your input is empty.
+2. Press `Ctrl + Space`.
+3. Choose from suggestions like:
+   - "Run tests for the changes I just made."
+   - "Document the new API endpoints in docs/api.md."
+   - "Check for any TODOs I might have missed."

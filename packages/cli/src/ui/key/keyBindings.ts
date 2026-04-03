@@ -507,6 +507,7 @@ export const commandCategories: readonly CommandCategory[] = [
       Command.TOGGLE_MARKDOWN,
       Command.TOGGLE_COPY_MODE,
       Command.TOGGLE_YOLO,
+      Command.TOGGLE_VIBE_MODE,
       Command.CYCLE_APPROVAL_MODE,
       Command.SHOW_MORE_LINES,
       Command.EXPAND_PASTE,
