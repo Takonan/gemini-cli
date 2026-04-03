@@ -134,11 +134,11 @@ function buildNextPromptOptionsPrompt(
     `Generate 3–5 distinct, actionable follow-up items the user might want to do next. ` +
     `These can be either a textual prompt to send to the AI, or a direct shell command to execute.\n\n` +
     `Guidelines:\n` +
-    `- Prioritize Git operations (commit, status, add) if there are pending changes.\n` +
-    `- If the project has pre-commit hooks (e.g. husky, lint-staged) or standard scripts like "npm test", "npm run lint", suggest running them.\n` +
-    `- For terminal actions, provide the "command" field. For regular AI prompts, leave it empty.\n` +
-    `- Make suggestions specific and relevant to the conversation and workspace state above.\n` +
-    `- Each option should be something the user can select and act on immediately.`
+    `- **Direct Conversation Mapping:** If the assistant's last message provided a numbered list of steps, options, or commands, your suggestions MUST directly correspond to those items, in order. Extract any shell commands for the "command" field.\n` +
+    `- **Context Awareness:** Strongly tie suggestions to the Recent conversation. If the user was just instructed to do something (like modify a file), suggest the logical next step for that specific task.\n` +
+    `- **Terminal Actions:** For ANY action that can be run directly in the terminal (like 'git status', 'npm test', 'git add'), you MUST provide the exact shell command in the "command" field. Do not make these textual prompts.\n` +
+    `- **Git & Workspace:** If there are pending changes relevant to the current task, suggest Git operations (commit, status, add). However, do not let generic Git suggestions push out specific conversation-based steps.\n` +
+    `- **Submission:** Only omit the "command" field if the action requires the AI to generate code, explain something, or answer a question.`
   );
 }
 
