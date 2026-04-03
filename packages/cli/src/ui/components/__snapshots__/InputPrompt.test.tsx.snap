@@ -429,6 +429,249 @@ exports[`InputPrompt > mouse interaction > should toggle paste expansion on doub
 "
 `;
 
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 13`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ src/ui/components/InputPrompt.tsx:249:32
+
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () =>
+ 249:       makeVibeGenerator(config.getBaseLlmClient(), {
+ 250:         model: settings.ui?.vibe?.model,
+ 251:       }),
+ 252:     [config, settings.ui?.vibe?.model],
+
+ -  (src/ui/components/InputPrompt.tsx:249:32)
+ -mountMem 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:4272:23)
+ -Object.useMe 
+  o           (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconcil
+              er.development.js:14920:18)
+ -process.env.NODE_ENV.exports 
+  useMemo                     (/Users/harrischan/Github/gemini-cli/node_modules/react/cjs/react.dev
+                              elopment.js:1251:34)
+ - InputPrompt (src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bott 
+  m-frame                (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/rea
+                         ct-reconciler.development.js:15859:20)
+ -renderWithHoo 
+  s            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconci
+               ler.development.js:3221:22)
+ -updateFunctionComp 
+  nent              (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-re
+                    conciler.development.js:6475:19)
+ -beginWor 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:8009:18)
+ -runWithFiberIn 
+  EV            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconc
+                iler.development.js:1738:13)
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 14`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ src/ui/components/InputPrompt.tsx:249:32
+
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () =>
+ 249:       makeVibeGenerator(config.getBaseLlmClient(), {
+ 250:         model: settings.ui?.vibe?.model,
+ 251:       }),
+ 252:     [config, settings.ui?.vibe?.model],
+
+ -  (src/ui/components/InputPrompt.tsx:249:32)
+ -mountMem 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:4272:23)
+ -Object.useMe 
+  o           (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconcil
+              er.development.js:14920:18)
+ -process.env.NODE_ENV.exports 
+  useMemo                     (/Users/harrischan/Github/gemini-cli/node_modules/react/cjs/react.dev
+                              elopment.js:1251:34)
+ - InputPrompt (src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bott 
+  m-frame                (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/rea
+                         ct-reconciler.development.js:15859:20)
+ -renderWithHoo 
+  s            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconci
+               ler.development.js:3221:22)
+ -updateFunctionComp 
+  nent              (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-re
+                    conciler.development.js:6475:19)
+ -beginWor 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:8009:18)
+ -runWithFiberIn 
+  EV            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconc
+                iler.development.js:1738:13)
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 15`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ src/ui/components/InputPrompt.tsx:249:32
+
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () =>
+ 249:       makeVibeGenerator(config.getBaseLlmClient(), {
+ 250:         model: settings.ui?.vibe?.model,
+ 251:       }),
+ 252:     [config, settings.ui?.vibe?.model],
+
+ -  (src/ui/components/InputPrompt.tsx:249:32)
+ -mountMem 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:4272:23)
+ -Object.useMe 
+  o           (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconcil
+              er.development.js:14920:18)
+ -process.env.NODE_ENV.exports 
+  useMemo                     (/Users/harrischan/Github/gemini-cli/node_modules/react/cjs/react.dev
+                              elopment.js:1251:34)
+ - InputPrompt (src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bott 
+  m-frame                (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/rea
+                         ct-reconciler.development.js:15859:20)
+ -renderWithHoo 
+  s            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconci
+               ler.development.js:3221:22)
+ -updateFunctionComp 
+  nent              (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-re
+                    conciler.development.js:6475:19)
+ -beginWor 
+          (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconciler.d
+          evelopment.js:8009:18)
+ -runWithFiberIn 
+  EV            (/Users/harrischan/Github/gemini-cli/node_modules/react-reconciler/cjs/react-reconc
+                iler.development.js:1738:13)
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 16`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ packages/cli/src/ui/components/InputPrompt.tsx:249:32
+
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () =>
+ 249:       makeVibeGenerator(config.getBaseLlmClient(), {
+ 250:         model: settings.ui?.vibe?.model,
+ 251:       }),
+ 252:     [config, settings.ui?.vibe?.model],
+
+ -  (packages/cli/src/ui/components/InputPrompt.tsx:249:32)
+ - mountMemo (node_modules/react-reconciler/cjs/react-reconciler.development.js:4272:23)
+ - Object.useMemo (node_modules/react-reconciler/cjs/react-reconciler.development.js:14920:18)
+ - process.env.NODE_ENV.exports.useMemo (node_modules/react/cjs/react.development.js:1251:34)
+ - InputPrompt (packages/cli/src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bottom-fr
+  me                          (node_modules/react-reconciler/cjs/react-reconciler.development.js:15
+                              859:20)
+ - renderWithHooks (node_modules/react-reconciler/cjs/react-reconciler.development.js:3221:22)
+ -updateFunctionComponent
+                         (node_modules/react-reconciler/cjs/react-reconciler.development.js:6475:19
+                         )
+ - beginWork (node_modules/react-reconciler/cjs/react-reconciler.development.js:8009:18)
+ - runWithFiberInDEV (node_modules/react-reconciler/cjs/react-reconciler.development.js:1738:13)
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 17`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ packages/cli/src/ui/components/InputPrompt.tsx:249:32
+
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () =>
+ 249:       makeVibeGenerator(config.getBaseLlmClient(), {
+ 250:         model: settings.ui?.vibe?.model,
+ 251:       }),
+ 252:     [config, settings.ui?.vibe?.model],
+
+ -  (packages/cli/src/ui/components/InputPrompt.tsx:249:32)
+ - mountMemo (node_modules/react-reconciler/cjs/react-reconciler.development.js:4272:23)
+ - Object.useMemo (node_modules/react-reconciler/cjs/react-reconciler.development.js:14920:18)
+ - process.env.NODE_ENV.exports.useMemo (node_modules/react/cjs/react.development.js:1251:34)
+ - InputPrompt (packages/cli/src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bottom-fr
+  me                          (node_modules/react-reconciler/cjs/react-reconciler.development.js:15
+                              859:20)
+ - renderWithHooks (node_modules/react-reconciler/cjs/react-reconciler.development.js:3221:22)
+ -updateFunctionComponent
+                         (node_modules/react-reconciler/cjs/react-reconciler.development.js:6475:19
+                         )
+ - beginWork (node_modules/react-reconciler/cjs/react-reconciler.development.js:8009:18)
+ - runWithFiberInDEV (node_modules/react-reconciler/cjs/react-reconciler.development.js:1738:13)
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 18`] = `
+"
+  ERROR  config.getBaseLlmClient is not a function
+
+ packages/cli/src/ui/components/InputPrompt.tsx:249:32
+
+ 246:   const [vibeDraft, setVibeDraft] = useState('');
+ 247:   const vibeGenerator = useMemo(
+ 248:     () =>
+ 249:       makeVibeGenerator(config.getBaseLlmClient(), {
+ 250:         model: settings.ui?.vibe?.model,
+ 251:       }),
+ 252:     [config, settings.ui?.vibe?.model],
+
+ -  (packages/cli/src/ui/components/InputPrompt.tsx:249:32)
+ - mountMemo (node_modules/react-reconciler/cjs/react-reconciler.development.js:4272:23)
+ - Object.useMemo (node_modules/react-reconciler/cjs/react-reconciler.development.js:14920:18)
+ - process.env.NODE_ENV.exports.useMemo (node_modules/react/cjs/react.development.js:1251:34)
+ - InputPrompt (packages/cli/src/ui/components/InputPrompt.tsx:247:25)
+ -Object.react-stack-bottom-fr
+  me                          (node_modules/react-reconciler/cjs/react-reconciler.development.js:15
+                              859:20)
+ - renderWithHooks (node_modules/react-reconciler/cjs/react-reconciler.development.js:3221:22)
+ -updateFunctionComponent
+                         (node_modules/react-reconciler/cjs/react-reconciler.development.js:6475:19
+                         )
+ - beginWork (node_modules/react-reconciler/cjs/react-reconciler.development.js:8009:18)
+ - runWithFiberInDEV (node_modules/react-reconciler/cjs/react-reconciler.development.js:1738:13)
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 19`] = `
+"▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ > [Pasted Text: 10 lines]
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 20`] = `
+"▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ > [Pasted Text: 10 lines]
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+"
+`;
+
+exports[`InputPrompt > mouse interaction > should toggle paste expansion on double-click 21`] = `
+"▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+ > [Pasted Text: 10 lines]
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+"
+`;
+
 exports[`InputPrompt > snapshots > should not show inverted cursor when shell is focused 1`] = `
 "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
  >   Type your message or @path/to/file                                                             

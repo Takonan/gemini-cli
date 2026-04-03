@@ -15,6 +15,11 @@ import { useKeypress, type Key } from '../hooks/useKeypress.js';
 import { KeypressPriority } from '../contexts/KeypressContext.js';
 import { AskUserDialog } from './AskUserDialog.js';
 import { QuestionType, type Question } from '@google/gemini-cli-core';
+import { Command } from '../key/keyMatchers.js';
+import { useKeyMatchers } from '../hooks/useKeyMatchers.js';
+import { TextInput } from './shared/TextInput.js';
+import { useTextBuffer } from './shared/text-buffer.js';
+import { formatCommand } from '../key/keybindingUtils.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +42,8 @@ export interface VibeInputProps {
    * Non-empty → B mode: generate clarifying questions to refine the draft.
    */
   initialDraft?: string;
+  /** If true, bypass review and submit the refined prompt immediately. */
+  isYolo?: boolean;
 }
 
 // ─── Phase types ─────────────────────────────────────────────────────────────
@@ -45,6 +52,7 @@ type Phase =
   | { status: 'loading' }
   | { status: 'asking'; questions: Question[] }
   | { status: 'assembling' }
+  | { status: 'reviewing'; refined: string }
   | { status: 'error'; message: string };
 
 // ─── Spinner ──────────────────────────────────────────────────────────────────
@@ -105,6 +113,43 @@ function toNextPromptQuestion(
   ];
 }
 
+// ─── Review component ─────────────────────────────────────────────────────────
+
+interface RefinedPromptReviewProps {
+  refined: string;
+  onSubmit: (final: string) => void;
+  onBack: () => void;
+  width: number;
+}
+
+const RefinedPromptReview: React.FC<RefinedPromptReviewProps> = ({
+  refined,
+  onSubmit,
+  onBack,
+  width,
+}) => {
+  const buffer = useTextBuffer({
+    initialText: refined,
+    viewport: { width: width - 4, height: 10 },
+  });
+
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      <Box marginBottom={1}>
+        <Text bold color="magenta">
+          Review Refined Prompt:
+        </Text>
+      </Box>
+      <Box borderStyle="round" borderColor="dim" paddingX={1} width={width - 2}>
+        <TextInput buffer={buffer} onSubmit={onSubmit} onCancel={onBack} />
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>Enter to confirm • Esc to edit answers</Text>
+      </Box>
+    </Box>
+  );
+};
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export const VibeInput: React.FC<VibeInputProps> = ({
@@ -115,10 +160,16 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   conversationContext = '',
   workspaceContext = '',
   initialDraft = '',
+  isYolo: isYoloProp = false,
 }) => {
+  const keyMatchers = useKeyMatchers();
+
   // currentDraftRef holds the active draft — starts as initialDraft, updated
   // when the user presses Ctrl+Space while typing in the freeform box.
   const currentDraftRef = useRef(initialDraft);
+
+  // Store answers from AskUserDialog to allow going back from review.
+  const [answers, setAnswers] = useState<Record<string, string>>({});
 
   // generationKey increments to trigger a fresh generation run.
   const [generationKey, setGenerationKey] = useState(0);
@@ -133,6 +184,9 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   // Store clarifying questions for B mode assembly
   const clarifyingQuestionsRef = useRef<ClarifyingQuestion[]>([]);
 
+  // Track if we should bypass review. Initially from prop, can be toggled by Ctrl+Y.
+  const isYoloRef = useRef(isYoloProp);
+
   // Abort on unmount
   const abortRef = useRef<AbortController>(new AbortController());
   useEffect(
@@ -140,6 +194,58 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       abortRef.current.abort();
     },
     [],
+  );
+
+  /**
+   * Core logic to assemble and submit.
+   */
+  const assembleAndSubmit = useCallback(
+    async (
+      draft: string,
+      newAnswers: Record<string, string>,
+      skipReview: boolean,
+    ) => {
+      setPhase({ status: 'assembling' });
+
+      const questions = clarifyingQuestionsRef.current;
+      const questionAnswerPairs = questions
+        .map((q, i) => ({
+          question: q.question,
+          answer: newAnswers[i] ?? '',
+        }))
+        .filter((qa) => qa.answer.trim());
+
+      try {
+        const refined = await vibeGenerator.assembleRefinedPrompt(
+          draft,
+          questionAnswerPairs,
+          abortRef.current.signal,
+        );
+        if (skipReview) {
+          onSubmit(refined);
+        } else {
+          setPhase({ status: 'reviewing', refined });
+        }
+      } catch (err: unknown) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+        if ((err as { name?: string }).name === 'AbortError') return;
+        // Fallback: refined is just draft with answers appended
+        const fallback =
+          draft.trim() +
+          (questionAnswerPairs.length
+            ? '\n\n' +
+              questionAnswerPairs
+                .map((qa) => `${qa.question}: ${qa.answer}`)
+                .join('\n')
+            : '');
+        if (skipReview) {
+          onSubmit(fallback);
+        } else {
+          setPhase({ status: 'reviewing', refined: fallback });
+        }
+      }
+    },
+    [vibeGenerator, onSubmit],
   );
 
   // Generate questions whenever generationKey changes (initially 0 = first run).
@@ -151,6 +257,12 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     const isClary = draft.trim().length > 0;
 
     async function generate() {
+      // If YOLO and in Clary mode, skip questions and assemble immediately.
+      if (isYoloRef.current && isClary) {
+        await assembleAndSubmit(draft, {}, true);
+        return;
+      }
+
       if (isClary) {
         const questions = await vibeGenerator.generateClarifyingQuestions(
           draft,
@@ -206,12 +318,60 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   });
 
   /**
+   * YOLO vibe mode: bypass review and submit immediately.
+   */
+  const handleYoloVibe = useCallback(
+    (key: Key) => {
+      if (keyMatchers[Command.TOGGLE_YOLO](key)) {
+        if (activeIsClaryMode && currentDraftRef.current.trim()) {
+          isYoloRef.current = true;
+          // Trigger assembly immediately with current answers (none if early).
+          void assembleAndSubmit(currentDraftRef.current.trim(), answers, true);
+          return true;
+        }
+      }
+      return false;
+    },
+    [activeIsClaryMode, answers, assembleAndSubmit, keyMatchers],
+  );
+
+  useKeypress(handleYoloVibe, {
+    isActive: phase.status === 'asking' || phase.status === 'loading',
+    priority: KeypressPriority.High,
+  });
+
+  const handleReviewBack = useCallback(() => {
+    isYoloRef.current = false; // Disable YOLO if user went back
+    setPhase((p) => {
+      if (p.status === 'reviewing') {
+        // Return to asking mode
+        return {
+          status: 'asking',
+          questions:
+            clarifyingQuestionsRef.current.length > 0
+              ? toAskUserQuestions(clarifyingQuestionsRef.current)
+              : [],
+        };
+      }
+      return p;
+    });
+  }, []);
+
+  const handleReviewSubmit = useCallback(
+    (final: string) => {
+      onSubmit(final);
+    },
+    [onSubmit],
+  );
+
+  /**
    * Called when Ctrl+Space is pressed inside the suggestion dialog.
    * - Without freeform text → regenerate a fresh batch of A-mode suggestions.
    * - With freeform text → treat it as a draft and enter B-mode clarification.
    */
   const handleCtrlSpace = useCallback(
     (freeformText?: string) => {
+      isYoloRef.current = false; // Ctrl+Space resets YOLO
       if (freeformText && freeformText.trim()) {
         // Switch to B-mode clarification for the typed freeform text
         currentDraftRef.current = freeformText;
@@ -228,10 +388,11 @@ export const VibeInput: React.FC<VibeInputProps> = ({
   );
 
   const handleDialogSubmit = useCallback(
-    async (answers: Record<string, string>) => {
+    async (newAnswers: Record<string, string>) => {
+      setAnswers(newAnswers);
       if (!activeIsClaryMode) {
         // A mode: the selected option IS the message
-        const answer = answers[0] ?? '';
+        const answer = newAnswers[0] ?? '';
         if (answer.trim()) {
           onSubmit(answer.trim());
         } else {
@@ -241,40 +402,13 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       }
 
       // B mode: assemble a refined prompt from draft + answers
-      setPhase({ status: 'assembling' });
-
-      const draft = currentDraftRef.current;
-      const questions = clarifyingQuestionsRef.current;
-      const questionAnswerPairs = questions
-        .map((q, i) => ({
-          question: q.question,
-          answer: answers[i] ?? '',
-        }))
-        .filter((qa) => qa.answer.trim());
-
-      try {
-        const refined = await vibeGenerator.assembleRefinedPrompt(
-          draft,
-          questionAnswerPairs,
-          abortRef.current.signal,
-        );
-        onSubmit(refined);
-      } catch (err: unknown) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-        if ((err as { name?: string }).name === 'AbortError') return;
-        // Fallback: submit the draft with answers appended
-        const fallback =
-          draft.trim() +
-          (questionAnswerPairs.length
-            ? '\n\n' +
-              questionAnswerPairs
-                .map((qa) => `${qa.question}: ${qa.answer}`)
-                .join('\n')
-            : '');
-        onSubmit(fallback);
-      }
+      await assembleAndSubmit(
+        currentDraftRef.current,
+        newAnswers,
+        isYoloRef.current,
+      );
     },
-    [activeIsClaryMode, vibeGenerator, onSubmit, onCancel],
+    [activeIsClaryMode, assembleAndSubmit, onCancel, onSubmit],
   );
 
   const handleDialogCancel = useCallback(() => {
@@ -303,6 +437,17 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     );
   }
 
+  if (phase.status === 'reviewing') {
+    return (
+      <RefinedPromptReview
+        refined={phase.refined}
+        onSubmit={handleReviewSubmit}
+        onBack={handleReviewBack}
+        width={inputWidth}
+      />
+    );
+  }
+
   if (phase.status === 'error') {
     return (
       <Box paddingLeft={1}>
@@ -318,13 +463,18 @@ export const VibeInput: React.FC<VibeInputProps> = ({
       <AskUserDialog
         questions={phase.questions}
         onSubmit={handleDialogSubmit}
+        initialAnswers={answers}
         onCancel={handleDialogCancel}
         onCtrlSpace={!activeIsClaryMode ? handleCtrlSpace : undefined}
-        extraParts={
-          !activeIsClaryMode
-            ? ['Ctrl+Space to refine or regenerate']
-            : undefined
+        onCtrlY={
+          activeIsClaryMode ? (curr) => handleDialogSubmit(curr) : undefined
         }
+        extraParts={[
+          ...(activeIsClaryMode
+            ? [`${formatCommand(Command.TOGGLE_YOLO)} to skip questions`]
+            : []),
+          ...(!activeIsClaryMode ? ['Ctrl+Space to refine or regenerate'] : []),
+        ]}
         width={inputWidth - 2}
       />
     </Box>

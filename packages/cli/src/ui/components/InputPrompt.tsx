@@ -244,6 +244,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   } = useUIState();
   const [vibeModeActive, setVibeModeActive] = useState(false);
   const [vibeDraft, setVibeDraft] = useState('');
+  const [vibeIsYolo, setVibeIsYolo] = useState(false);
   const vibeGenerator = useMemo(
     () =>
       makeVibeGenerator(config.getBaseLlmClient(), {
@@ -889,6 +890,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
           if (!vibeModeActive) {
             // Capture draft text so VibeInput knows whether to use A or B mode
             setVibeDraft(buffer.text);
+            setVibeIsYolo(false);
             setVibeModeActive(true);
             return true;
           }
@@ -900,6 +902,19 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
         }
         // During streaming: consume to prevent the raw sequence from landing in
         // the text buffer, but don't toggle (toggle is skipped during streaming).
+        return true;
+      }
+
+      if (keyMatchers[Command.TOGGLE_YOLO](key) && !shellModeActive) {
+        if (streamingState === StreamingState.Idle) {
+          if (!vibeModeActive) {
+            setVibeDraft(buffer.text);
+            setVibeIsYolo(true);
+            setVibeModeActive(true);
+            return true;
+          }
+          return false;
+        }
         return true;
       }
 
@@ -1612,6 +1627,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             conversationContext={vibeContext}
             workspaceContext={workspaceContext}
             initialDraft={vibeDraft}
+            isYolo={vibeIsYolo}
           />
         </Box>
       </HalfLinePaddedBox>

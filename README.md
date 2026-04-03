@@ -154,6 +154,8 @@ rough drafts into precise instructions.
   analyzes your context to suggest logical next steps.
 - **Mode B: Draft Refinement**: If you have a rough draft, Gemini CLI generates
   targeted clarifying questions to help you specify missing details.
+- **YOLO Vibe Mode**: Press `Ctrl + Y` to immediately refine and submit your
+  draft, bypassing clarifying questions and manual review for a faster flow.
 - **Context Aware**: Suggestions are seeded with your conversation history and
   current workspace state.
 

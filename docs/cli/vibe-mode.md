@@ -54,10 +54,27 @@ Directly link your prompt to specific files or symbols in your project.
 | Shortcut       | Action                                                        |
 | :------------- | :------------------------------------------------------------ |
 | `Ctrl + Space` | Toggle Vibe Mode / Regenerate suggestions / Refine typed text |
+| `Ctrl + Y`     | YOLO Mode: Immediately refine and submit the current draft    |
 | `j` / `k`      | Navigate through suggestions or options                       |
 | `Tab`          | Select an option and advance to the next question             |
 | `Enter`        | Submit the final composed prompt                              |
-| `Esc`          | Cancel and return to normal input                             |
+| `Esc`          | Cancel and return to normal input (or go back from review)    |
+
+## YOLO Vibe Mode
+
+For power users who want the benefits of Vibe Mode refinement without the
+interactive Q&A, **YOLO Vibe Mode** provides a "fast path" to submission.
+
+When you have a rough draft typed, press `Ctrl + Y` instead of `Ctrl + Space`.
+Gemini CLI will:
+
+1.  **Skip** all clarifying questions.
+2.  **Automatically refine** your prompt using available context.
+3.  **Immediately submit** the refined prompt to the model.
+
+This is ideal for quickly "vibing up" a clear but informal instruction (e.g.,
+typing `fix the lint` and pressing `Ctrl + Y` to send a polished refactoring
+request).
 
 ## Common Workflows
 

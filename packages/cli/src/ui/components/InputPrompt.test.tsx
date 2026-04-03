@@ -365,6 +365,7 @@ describe('InputPrompt', () => {
         getVimMode: () => false,
         getUseBackgroundColor: () => true,
         getTerminalBackground: () => undefined,
+        getBaseLlmClient: () => ({ generateJson: vi.fn() }),
         getWorkspaceContext: () => ({
           getDirectories: () => ['/test/project/src'],
         }),

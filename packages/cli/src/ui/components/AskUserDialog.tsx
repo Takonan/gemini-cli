@@ -171,9 +171,12 @@ interface AskUserDialogProps {
    */
   onSubmit: (answers: { [questionIndex: string]: string }) => void;
   /**
-   * Callback fired when the user cancels the dialog (e.g. via Escape).
+   * Optional initial answers to populate the dialog.
    */
-  onCancel: () => void;
+  initialAnswers?: { [questionIndex: string]: string };
+  /**
+   * Callback fired when the user cancels the dialog (e.g. via Escape).
+   */ onCancel: () => void;
   /**
    * Optional callback to notify parent when text input is active.
    * Useful for managing global keypress handlers.
@@ -186,12 +189,16 @@ interface AskUserDialogProps {
    */
   onCtrlSpace?: (freeformText?: string) => void;
   /**
+   * Optional callback fired when Ctrl+Y (YOLO) is pressed inside the dialog.
+   * Called with the currently provided answers.
+   */
+  onCtrlY?: (answers: { [questionIndex: string]: string }) => void;
+  /**
    * Width of the dialog.
    */
-  width: number;
-  /**
+  width: number /**
    * Height constraint for scrollable content.
-   */
+   */;
   availableHeight?: number;
   /**
    * Custom keyboard shortcut hints (e.g., ["Ctrl+P to edit"])
@@ -277,6 +284,7 @@ interface TextQuestionViewProps {
   onAnswer: (answer: string) => void;
   onSelectionChange?: (answer: string) => void;
   onEditingCustomOption?: (editing: boolean) => void;
+  onCtrlY?: () => void;
   availableWidth: number;
   availableHeight?: number;
   initialAnswer?: string;
@@ -289,6 +297,7 @@ const TextQuestionView: React.FC<TextQuestionViewProps> = ({
   onAnswer,
   onSelectionChange,
   onEditingCustomOption,
+  onCtrlY,
   availableWidth,
   availableHeight,
   initialAnswer,
@@ -321,7 +330,7 @@ const TextQuestionView: React.FC<TextQuestionViewProps> = ({
     }
   }, [textValue, onSelectionChange, buffer.pastedContent]);
 
-  // Handle Ctrl+C to clear all text
+  // Handle Ctrl+C to clear all text and Ctrl+Y for YOLO
   const handleExtraKeys = useCallback(
     (key: Key) => {
       if (keyMatchers[Command.QUIT](key)) {
@@ -331,9 +340,15 @@ const TextQuestionView: React.FC<TextQuestionViewProps> = ({
         buffer.setText('');
         return true;
       }
+      if (keyMatchers[Command.TOGGLE_YOLO](key)) {
+        if (onCtrlY) {
+          onCtrlY();
+          return true;
+        }
+      }
       return false;
     },
-    [buffer, textValue, keyMatchers],
+    [buffer, textValue, keyMatchers, onCtrlY],
   );
 
   useKeypress(handleExtraKeys, { isActive: true, priority: true });
@@ -498,6 +513,7 @@ interface ChoiceQuestionViewProps {
   onSelectionChange?: (answer: string) => void;
   onEditingCustomOption?: (editing: boolean) => void;
   onCtrlSpace?: (freeformText?: string) => void;
+  onCtrlY?: () => void;
   availableWidth: number;
   availableHeight?: number;
   initialAnswer?: string;
@@ -511,6 +527,7 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
   onSelectionChange,
   onEditingCustomOption,
   onCtrlSpace,
+  onCtrlY,
   availableWidth,
   availableHeight,
   initialAnswer,
@@ -686,6 +703,11 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
         return true;
       }
 
+      if (onCtrlY && keyMatchers[Command.TOGGLE_YOLO](key)) {
+        onCtrlY();
+        return true;
+      }
+
       // Don't jump if a navigation or selection key is pressed
       if (
         keyMatchers[Command.DIALOG_NAVIGATION_UP](key) ||
@@ -729,6 +751,7 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
       customBuffer,
       onEditingCustomOption,
       onCtrlSpace,
+      onCtrlY,
       customOptionText,
       keyMatchers,
     ],
@@ -1032,9 +1055,11 @@ const ChoiceQuestionView: React.FC<ChoiceQuestionViewProps> = ({
 export const AskUserDialog: React.FC<AskUserDialogProps> = ({
   questions,
   onSubmit,
+  initialAnswers = {},
   onCancel,
   onActiveTextInputChange,
   onCtrlSpace,
+  onCtrlY,
   width,
   availableHeight: availableHeightProp,
   extraParts,
@@ -1047,7 +1072,10 @@ export const AskUserDialog: React.FC<AskUserDialogProps> = ({
       ? uiState?.availableTerminalHeight
       : undefined);
 
-  const [state, dispatch] = useReducer(askUserDialogReducerLogic, initialState);
+  const [state, dispatch] = useReducer(askUserDialogReducerLogic, {
+    ...initialState,
+    answers: initialAnswers,
+  });
   const { answers, isEditingCustomOption, submitted } = state;
 
   const reviewTabIndex = questions.length;
@@ -1270,6 +1298,7 @@ export const AskUserDialog: React.FC<AskUserDialogProps> = ({
         onAnswer={handleAnswer}
         onSelectionChange={handleSelectionChange}
         onEditingCustomOption={handleEditingCustomOption}
+        onCtrlY={() => onCtrlY?.(answers)}
         availableWidth={width}
         availableHeight={availableHeight}
         initialAnswer={answers[currentQuestionIndex]}
@@ -1284,6 +1313,7 @@ export const AskUserDialog: React.FC<AskUserDialogProps> = ({
         onSelectionChange={handleSelectionChange}
         onEditingCustomOption={handleEditingCustomOption}
         onCtrlSpace={onCtrlSpace}
+        onCtrlY={() => onCtrlY?.(answers)}
         availableWidth={width}
         availableHeight={availableHeight}
         initialAnswer={answers[currentQuestionIndex]}

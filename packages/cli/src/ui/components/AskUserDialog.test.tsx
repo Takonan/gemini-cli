@@ -61,6 +61,34 @@ describe('AskUserDialog', () => {
     expect(lastFrame()).toMatchSnapshot();
   });
 
+  it('pre-fills initialAnswers', async () => {
+    const questions: Question[] = [
+      {
+        question: 'First question?',
+        header: 'Q1',
+        type: QuestionType.TEXT,
+      },
+      {
+        question: 'Second question?',
+        header: 'Q2',
+        type: QuestionType.TEXT,
+      },
+    ];
+    const initialAnswers = { '0': 'pre-filled answer' };
+    const { lastFrame } = await renderWithProviders(
+      <AskUserDialog
+        questions={questions}
+        initialAnswers={initialAnswers}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        width={120}
+      />,
+      { width: 120 },
+    );
+
+    expect(lastFrame()).toContain('pre-filled answer');
+  });
+
   describe.each([
     {
       name: 'Single Select',
