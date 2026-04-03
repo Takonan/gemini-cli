@@ -127,6 +127,7 @@ export interface InputPromptProps {
   suggestionsPosition?: 'above' | 'below';
   setBannerVisible: (visible: boolean) => void;
   copyModeEnabled?: boolean;
+  onExecuteCommand?: (command: string) => void;
 }
 
 // The input content, input container, and input suggestions list may have different widths
@@ -222,6 +223,7 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
   suggestionsPosition = 'below',
   setBannerVisible,
   copyModeEnabled = false,
+  onExecuteCommand,
 }) => {
   const isHelpDismissKey = useIsHelpDismissKey();
   const keyMatchers = useKeyMatchers();
@@ -1620,6 +1622,10 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
             onSubmit={(val) => {
               setVibeModeActive(false);
               handleSubmitAndClear(val);
+            }}
+            onExecuteCommand={(cmd) => {
+              setVibeModeActive(false);
+              onExecuteCommand?.(cmd);
             }}
             onCancel={() => setVibeModeActive(false)}
             inputWidth={inputWidth}

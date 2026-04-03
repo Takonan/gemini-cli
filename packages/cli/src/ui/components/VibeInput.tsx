@@ -26,6 +26,8 @@ import { formatCommand } from '../key/keybindingUtils.js';
 export interface VibeInputProps {
   /** Called with the final composed prompt — hands back to GeminiCLI's onSubmit */
   onSubmit: (value: string) => void;
+  /** Called when user selects a direct terminal action */
+  onExecuteCommand?: (command: string) => void;
   /** Called when user presses Esc — restores normal input */
   onCancel: () => void;
   /** Available width */
@@ -96,16 +98,20 @@ function toAskUserQuestions(clarifying: ClarifyingQuestion[]): Question[] {
  * Convert next-prompt options into a single AskUserDialog question.
  */
 function toNextPromptQuestion(
-  options: Array<{ label: string; description: string }>,
+  options: Array<{ label: string; description: string; command?: string }>,
 ): Question[] {
+  const hasCommand = options.some((opt) => opt.command);
   return [
     {
       question: 'What would you like to do next?',
       header: 'Next',
-      type: QuestionType.CHOICE,
+      type: hasCommand ? QuestionType.COMMAND : QuestionType.CHOICE,
       options: options.map((opt) => ({
-        label: opt.label,
-        description: opt.description,
+        label: opt.command ? `Terminal: ${opt.label}` : opt.label,
+        description: opt.command
+          ? `Execute: ${opt.command}\n${opt.description}`
+          : opt.description,
+        command: opt.command,
       })),
       multiSelect: false,
       placeholder: 'Describe what you want to do...',
@@ -154,6 +160,7 @@ const RefinedPromptReview: React.FC<RefinedPromptReviewProps> = ({
 
 export const VibeInput: React.FC<VibeInputProps> = ({
   onSubmit,
+  onExecuteCommand,
   onCancel,
   inputWidth,
   vibeGenerator,
@@ -391,7 +398,17 @@ export const VibeInput: React.FC<VibeInputProps> = ({
     async (newAnswers: Record<string, string>) => {
       setAnswers(newAnswers);
       if (!activeIsClaryMode) {
-        // A mode: the selected option IS the message
+        // A mode: check if it's a command or a prompt
+        if (phase.status === 'asking') {
+          const selectedOption = phase.questions[0]?.options?.find(
+            (opt) => opt.label === newAnswers[0],
+          );
+          if (selectedOption?.command && onExecuteCommand) {
+            onExecuteCommand(selectedOption.command);
+            return;
+          }
+        }
+
         const answer = newAnswers[0] ?? '';
         if (answer.trim()) {
           onSubmit(answer.trim());
@@ -408,7 +425,14 @@ export const VibeInput: React.FC<VibeInputProps> = ({
         isYoloRef.current,
       );
     },
-    [activeIsClaryMode, assembleAndSubmit, onCancel, onSubmit],
+    [
+      activeIsClaryMode,
+      assembleAndSubmit,
+      onCancel,
+      onSubmit,
+      onExecuteCommand,
+      phase,
+    ],
   );
 
   const handleDialogCancel = useCallback(() => {

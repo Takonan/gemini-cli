@@ -167,6 +167,7 @@ export const Composer = ({ isFocused = true }: { isFocused?: boolean }) => {
           suggestionsPosition={suggestionsPosition}
           onSuggestionsVisibilityChange={setSuggestionsVisible}
           copyModeEnabled={uiState.copyModeEnabled}
+          onExecuteCommand={uiActions.executeCommand}
         />
       )}
 

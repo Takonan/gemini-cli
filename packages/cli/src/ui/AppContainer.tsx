@@ -2465,6 +2465,19 @@ Logging in with Google... Restarting Gemini CLI to continue.
     [setShowPrivacyNotice],
   );
 
+  const executeCommand = useCallback(
+    async (command: string) => {
+      const prevShellMode = shellModeActive;
+      setShellModeActive(true);
+      try {
+        await handleFinalSubmit(command);
+      } finally {
+        setShellModeActive(prevShellMode);
+      }
+    },
+    [handleFinalSubmit, shellModeActive],
+  );
+
   const uiActions: UIActions = useMemo(
     () => ({
       handleThemeSelect,
@@ -2558,6 +2571,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
         setAccountSuspensionInfo(null);
         setAuthState(AuthState.Updating);
       },
+      executeCommand,
     }),
     [
       handleThemeSelect,
@@ -2614,6 +2628,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       config,
       historyManager,
       getPreferredEditor,
+      executeCommand,
     ],
   );
 

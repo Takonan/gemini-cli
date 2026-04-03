@@ -170,12 +170,15 @@ export interface ToolExecutionFailure<E = Error> {
 export interface QuestionOption {
   label: string;
   description: string;
+  /** Optional shell command to execute if this option is selected. */
+  command?: string;
 }
 
 export enum QuestionType {
   CHOICE = 'choice',
   TEXT = 'text',
   YESNO = 'yesno',
+  COMMAND = 'command',
 }
 
 export interface Question {

@@ -11,10 +11,10 @@ Vibe Mode transforms the standard linear input into a rich, exploratory drafting
 experience. Depending on whether you have already started typing, it operates in
 one of two modes:
 
-- **Mode A: Next Prompt Suggestions:** If your input is empty, Gemini CLI
-  analyzes your conversation history and workspace state to suggest logical next
-  steps (e.g., "Summarize recent changes," "Fix lint errors in the current
-  file").
+- **Mode A: Next Step Suggestions:** If your input is empty, Gemini CLI analyzes
+  your conversation history and workspace state to suggest logical next steps.
+  These include both high-quality **AI prompts** and direct **Terminal Actions**
+  (e.g., "Summarize recent changes," "git commit," "npm test").
 - **Mode B: Draft Refinement:** If you have a rough draft, Gemini CLI generates
   targeted clarifying questions to help you specify missing details, such as
   preferred implementation patterns or specific files to target.
@@ -43,6 +43,18 @@ Directly link your prompt to specific files or symbols in your project.
   files quickly.
 - **Context Injection:** When you mention a file, Vibe Mode automatically
   includes a summarized version of that file's content in the prompt context.
+
+### 4. Actionable Vibes (Terminal Actions)
+
+Beyond just prompts, Vibe Mode can suggest direct **Terminal Actions**.
+
+- **Smart Suggestions:** If your workspace has pending changes or common tasks
+  (like `npm test` or `git commit`), Vibe Mode displays these with a `Terminal:`
+  prefix.
+- **One-Click Execution:** Selecting a terminal action executes the command
+  immediately, bypassing the prompt refinement phase entirely.
+- **Git Awareness:** Vibe Mode prioritizes Git operations and pre-commit hooks
+  when it detects staged or unstaged changes.
 
 ## Keyboard Shortcuts
 
@@ -102,3 +114,15 @@ logical continuations.
    - "Run tests for the changes I just made."
    - "Document the new API endpoints in docs/api.md."
    - "Check for any TODOs I might have missed."
+
+### Executing Terminal Actions
+
+Vibe Mode can automate repetitive terminal tasks by suggesting direct commands.
+
+1. Ensure your input is empty.
+2. Press `Ctrl + Space`.
+3. If you have staged changes, Vibe Mode suggests:
+   - `Terminal: Commit changes with a message`
+   - `Terminal: Run pre-commit hooks`
+4. Select a terminal action and press `Enter`.
+5. Gemini CLI executes the command immediately in your shell.

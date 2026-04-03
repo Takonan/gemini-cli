@@ -93,6 +93,7 @@ export interface UIActions {
   handleNewAgentsSelect: (choice: NewAgentsChoice) => Promise<void>;
   getPreferredEditor: () => EditorType | undefined;
   clearAccountSuspension: () => void;
+  executeCommand: (command: string) => Promise<void>;
 }
 
 export const UIActionsContext = createContext<UIActions | null>(null);

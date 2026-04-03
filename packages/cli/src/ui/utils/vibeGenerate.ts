@@ -45,6 +45,11 @@ const NEXT_PROMPT_OPTIONS_SCHEMA: Record<string, unknown> = {
             description:
               'One sentence elaborating on what this prompt would do',
           },
+          command: {
+            type: 'string',
+            description:
+              'Optional shell command to execute directly if this is a terminal action (e.g., "npm test", "git commit -m ...")',
+          },
         },
       },
     },
@@ -125,10 +130,15 @@ function buildNextPromptOptionsPrompt(
     : '';
 
   return (
-    `You help users compose prompts for an AI coding assistant.${convLine}${wsLine}\n` +
-    `Generate 3–5 distinct, actionable follow-up prompts the user might want to send next. ` +
-    `Make them specific and relevant to the conversation above. ` +
-    `Each option should be something the user can send as-is or with minor edits.`
+    `You help users compose prompts or select terminal actions for an AI coding assistant.${convLine}${wsLine}\n` +
+    `Generate 3–5 distinct, actionable follow-up items the user might want to do next. ` +
+    `These can be either a textual prompt to send to the AI, or a direct shell command to execute.\n\n` +
+    `Guidelines:\n` +
+    `- Prioritize Git operations (commit, status, add) if there are pending changes.\n` +
+    `- If the project has pre-commit hooks (e.g. husky, lint-staged) or standard scripts like "npm test", "npm run lint", suggest running them.\n` +
+    `- For terminal actions, provide the "command" field. For regular AI prompts, leave it empty.\n` +
+    `- Make suggestions specific and relevant to the conversation and workspace state above.\n` +
+    `- Each option should be something the user can select and act on immediately.`
   );
 }
 
@@ -181,6 +191,8 @@ function buildRefinedPromptPrompt(
 export interface PromptOption {
   label: string;
   description: string;
+  /** Optional shell command to execute directly if this is a terminal action. */
+  command?: string;
 }
 
 export interface ClarifyingQuestion {

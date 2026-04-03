@@ -150,10 +150,13 @@ high-quality, context-aware prompts through a guided, menu-driven interface. It
 eliminates the "blank page" problem by suggesting next steps or refining your
 rough drafts into precise instructions.
 
-- **Mode A: Next Prompt Suggestions**: If your input is empty, Gemini CLI
-  analyzes your context to suggest logical next steps.
+- **Mode A: Next Step Suggestions**: If your input is empty, Gemini CLI analyzes
+  your context to suggest logical next steps.
 - **Mode B: Draft Refinement**: If you have a rough draft, Gemini CLI generates
   targeted clarifying questions to help you specify missing details.
+- **Actionable Vibes (Terminal Actions)**: Vibe Mode can suggest and execute
+  direct shell commands like `git commit` or `npm test` based on your workspace
+  state.
 - **YOLO Vibe Mode**: Press `Ctrl + Y` to immediately refine and submit your
   draft, bypassing clarifying questions and manual review for a faster flow.
 - **Context Aware**: Suggestions are seeded with your conversation history and
@@ -169,6 +172,15 @@ prompt. Instead of manual editing, you answer a few focused questions.
 3. Gemini CLI asks targeted questions (e.g., "Which specific files?",
    "Prioritize performance or readability?").
 4. Gemini CLI assembles these into a refined, high-quality prompt.
+
+### [Specific Use Case 2]: Executing Terminal Actions
+
+Quickly perform repetitive tasks by letting Vibe Mode suggest the next command.
+
+1. Ensure your input is empty.
+2. Press `Ctrl + Space`.
+3. Select a terminal action like `Terminal: Run pre-commit hooks`.
+4. Press `Enter` to execute it immediately in your shell.
 
 Learn more in the [Vibe Mode documentation](./docs/cli/vibe-mode.md).
 
